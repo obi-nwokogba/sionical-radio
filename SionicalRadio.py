@@ -12,7 +12,9 @@ DESIGN
     together in the top right corner. Below the header, a subtle 2 px
     hairline frames the station name and the scrolling "Artist - Song"
     marquee, which span the whole width of the app, with a fainter
-    hairline under the marquee. The middle row pairs the big circular
+    hairline under the marquee. Right after the station name, two wire
+    pills show the stream's format and bitrate (MP3, 128 KBPS), drawn
+    in the station name's color made 60% more transparent. The middle row pairs the big circular
     play/stop button (with three smaller circular controls beneath it:
     mute, love the station, next station) with the live FFT visualizer,
     whose bars always end on the same line as the mute / love / next
@@ -687,15 +689,28 @@ EQ_TICK_MS = 16         # visualizer refresh rate (16 ms is about 60 fps)
 EQ_ATTACK = 0.30        # how fast a bar rises toward a louder target
 EQ_RELEASE = 0.07       # how slowly a bar falls toward a quieter target
 EQ_BAR_OPACITY = 0.60   # 0..1 opacity of the visualizer bars (60%)
-MARQUEE_FONT_SIZE = 20  # marquee ("Artist - Song") font size in points
-STATION_FONT_SIZE = 31  # station name font size in points
-ICON_PAD = 10           # px of padding inside the small circles, all the
+MARQUEE_FONT_SIZE = 22  # marquee ("Artist - Song") font size in points
+STATION_FONT_SIZE = 33  # station name font size in points
+PILL_FONT_SIZE = 9     # format / bitrate pill font size in points
+PILL_ALPHA = 102        # pill wire + text: the station name's color
+                        # made 60% more transparent (0.4 x 255)
+PILL_PAD_X = 12         # horizontal padding (px) inside a pill
+PILL_PAD_Y = 4          # vertical padding (px) inside a pill
+ICON_PAD = 14           # px of padding inside the small circles, all the
                         # way round their SVG icons (the icon is this
-                        # much smaller than the button on every side)
+                        # much smaller than the button on every side);
+                        # 14 px makes the icons about 35% smaller than
+                        # the old 10 px, still perfectly centered
 ROW_ICON = 16           # side (px) of the SVG hearts in the station rows
+CHIP_GAP = 7            # gap (px) between the 10..50 band chips (half
+                        # the header's own 14 px spacing)
+THEME_GAP = 3           # gap (px) between the 50 chip and the THEME
+                        # button (half the old 6 px)
 HAIRLINE_TOP_ALPHA = 110    # the 2 px line above the station name (0-255)
 HAIRLINE_BOTTOM_ALPHA = 55  # the fainter 2 px line below the marquee
-SHELF_AREA = 176        # visible height (px) of the stations drawer
+SHELF_AREA = 188        # visible height (px) of the stations drawer:
+                        # 176 px of list plus breathing room so the
+                        # first row clears the panel's bottom edge
 SHELF_OVERLAP = 26      # how far (px) the drawer tucks under the panel
 
 
@@ -1347,6 +1362,34 @@ class StreamEngine(object):
             if text:
                 return text
         return ""
+
+    def stream_info(self):
+        """Return (format, kbps) describing the stream, or (None, None).
+
+        libvlc's track description of the playing media names the codec
+        (a fourcc integer) and usually carries the bitrate. Feeds the
+        two wire pills next to the station name. Anything unavailable -
+        nothing parsed yet, an older python-vlc without
+        get_tracks_info(), a secretive stream - comes back as None and
+        the caller falls back to probe_url_info()'s URL guess.
+        """
+        fmt = None
+        kbps = None
+        try:
+            media = self.player.get_media()
+            tracks = media.get_tracks_info() if media else []
+        except Exception:
+            return None, None
+        for track in tracks or []:
+            name = fourcc_to_format(getattr(track, "codec", 0))
+            rate = int(getattr(track, "bitrate", 0) or 0)
+            if name and fmt is None:
+                fmt = name
+            # Bitrate sanity: a real audio stream lands between 8 kbps
+            # and about 2 Mbps; anything else is not a bitrate.
+            if rate and kbps is None and 8000 <= rate <= 2000000:
+                kbps = int(round(rate / 1000.0))
+        return fmt, kbps
 
     def _read_now_playing(self, player):
         """Read the ICY now-playing text off one player's media."""
@@ -2192,6 +2235,126 @@ class Hairline(QWidget):
                          QPointF(rect.right() - 1.0, 1.0))
 
 
+class WirePill(QWidget):
+    """A small wire-outline pill, e.g. the stream's format or bitrate.
+
+    The border and the text both use the STATION NAME's color (the
+    theme accent) at PILL_ALPHA - the same color made 60% more
+    transparent - in the same "title" font as the station name, just
+    smaller (PILL_FONT_SIZE). The pill hugs its text and hides itself
+    completely while it has nothing to say.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._text = ""
+        self.setVisible(False)
+
+    def text(self):
+        """The pill's current text ("" when there is nothing to show)."""
+        return self._text
+
+    def set_pill_text(self, text):
+        """Set the text; an empty text hides the pill."""
+        text = text or ""
+        if text != self._text:
+            self._text = text
+            self.setVisible(bool(text))
+            self.updateGeometry()
+            self.update()
+
+    def refresh(self):
+        """Re-measure after a theme or font change."""
+        self.updateGeometry()
+        self.update()
+
+    def _pill_font(self):
+        return theme_font("title", PILL_FONT_SIZE, True, 2.0)
+
+    def sizeHint(self):
+        if not self._text:
+            return QSize(0, 0)
+        metrics = QFontMetrics(self._pill_font())
+        return QSize(metrics.horizontalAdvance(self._text) + 2 * PILL_PAD_X,
+                     metrics.height() + 2 * PILL_PAD_Y)
+
+    def paintEvent(self, event):
+        if not self._text:
+            return
+        painter = QPainter(self)
+        painter.setFont(self._pill_font())
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        color = col("accent", PILL_ALPHA)
+        # The wire: a rounded rect whose radius is half the height,
+        # so the ends are perfectly round (a true pill).
+        painter.setPen(QPen(color, 1.2))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRoundedRect(rect, rect.height() / 2.0, rect.height() / 2.0)
+        # The label, in the very same color.
+        painter.setPen(color)
+        painter.drawText(QRectF(self.rect()), Qt.AlignCenter, self._text)
+
+
+def probe_url_info(url):
+    """Guess the stream's (format, kbps) from its URL, or (None, None).
+
+    Most station URLs simply say what they are: ".../groovesalad-128-mp3",
+    ".../mp3-128", ".../aac-64". The codec tag and one of the common
+    bitrate numbers are picked out; the numbers must sit between
+    non-digits so ports and frequencies are never mistaken for a
+    bitrate. Used as the instant answer when a station is selected,
+    and as the fallback whenever the live stream does not volunteer
+    its track info.
+    """
+    low = (url or "").lower()
+    fmt = None
+    for tag, name in (("aac", "AAC"), ("m4a", "AAC"), ("opus", "OPUS"),
+                      ("vorbis", "OGG"), ("ogg", "OGG"), ("flac", "FLAC"),
+                      ("mp3", "MP3")):
+        if tag in low:
+            fmt = name
+            break
+    kbps = None
+    for rate in (320, 256, 224, 192, 160, 128, 112, 96, 80, 64, 56,
+                 48, 40, 32):
+        if re.search(r"(?<![0-9])%d(?![0-9])" % rate, low):
+            kbps = rate
+            break
+    return fmt, kbps
+
+
+def fourcc_to_format(fourcc):
+    """Decode a libvlc codec fourcc (an int) into a friendly name.
+
+    libvlc describes a track's codec as a four-character code packed
+    into an integer ("mp3 " for MP3, "mp4a" for AAC). Returns None for
+    codecs with no friendly name here.
+    """
+    try:
+        raw = "".join(chr((int(fourcc) >> (8 * shift)) & 0xFF)
+                      for shift in range(4)).strip().lower()
+    except Exception:
+        return None
+    if not raw:
+        return None
+    if "mp3" in raw or "mpga" in raw or "mp2" in raw or "mpeg" in raw:
+        return "MP3"
+    if "mp4a" in raw or "aac" in raw:
+        return "AAC"
+    if "a52" in raw:
+        return "AC3"
+    if "opus" in raw:
+        return "OPUS"
+    if "vorb" in raw:
+        return "OGG"
+    if "flac" in raw:
+        return "FLAC"
+    if "s16" in raw or "s24" in raw or "s32" in raw or "pcm" in raw \
+            or "u8" in raw:
+        return "PCM"
+    return None
+
+
 class WindowButton(QPushButton):
     """A macOS-style traffic light used on the frameless window.
 
@@ -2370,7 +2533,12 @@ class StationShelf(QWidget):
         # from under the panel while the shelf grows downward.
         layout.addStretch(1)
         self.station_list = QListWidget()
-        self.station_list.setFixedHeight(SHELF_AREA)
+        # SHELF_AREA holds the list plus breathing room: the list must
+        # start BELOW the SHELF_OVERLAP zone the panel covers (its top
+        # 26 px), otherwise the first row's top edge hides under the
+        # main panel - 4 px of clearance plus an 8 px bottom margin,
+        # so the list itself is SHELF_AREA - 12 tall.
+        self.station_list.setFixedHeight(SHELF_AREA - 12)
         layout.addWidget(self.station_list)
 
     def paintEvent(self, event):
@@ -2514,16 +2682,21 @@ class SionicalWindow(QMainWindow):
         header.addStretch(1)
 
         # The wire band chips (10..50) plus the THEME button, all
-        # together in the top right corner.
+        # together in the top right corner, packed tight: CHIP_GAP (7)
+        # between the chips and THEME_GAP (3) before the THEME button,
+        # both half of what they used to be.
+        chip_row = QHBoxLayout()
+        chip_row.setSpacing(CHIP_GAP)
         self._band_buttons = {}
         for count in EqualizerWidget.BAND_CHOICES:
             chip = GradientButton(str(count), "wire")
             chip.setChecked(count == 20)
             chip.clicked.connect(
                 lambda checked, c=count: self.on_band_clicked(c))
-            header.addWidget(chip)
+            chip_row.addWidget(chip)
             self._band_buttons[count] = chip
-        header.addSpacing(6)
+        header.addLayout(chip_row)
+        header.addSpacing(THEME_GAP)
         self.theme_button = GradientButton("THEME", "wire", checkable=False)
         self.theme_button.clicked.connect(self.on_theme_clicked)
         header.addWidget(self.theme_button)
@@ -2532,8 +2705,19 @@ class SionicalWindow(QMainWindow):
         # == the two big text rows, full width, framed by hairlines ===
         self.hairline_top = Hairline(HAIRLINE_TOP_ALPHA)
         root.addWidget(self.hairline_top)
+        # The station name, with the format and bitrate pills right
+        # after it ("MP3", "128 KBPS") - the same accent color as the
+        # name, made 60% more transparent, in the same font smaller.
+        station_row = QHBoxLayout()
+        station_row.setSpacing(14)
         self.station_label = QLabel(WINDOW_TITLE)
-        root.addWidget(self.station_label)
+        station_row.addWidget(self.station_label)
+        self.format_pill = WirePill()
+        station_row.addWidget(self.format_pill, 0, Qt.AlignVCenter)
+        self.bitrate_pill = WirePill()
+        station_row.addWidget(self.bitrate_pill, 0, Qt.AlignVCenter)
+        station_row.addStretch(1)
+        root.addLayout(station_row)
         self.marquee = MarqueeLabel(
             "Double-click a station, drop a .pls file anywhere, "
             "or open one with ADD PLS.")
@@ -2650,9 +2834,7 @@ class SionicalWindow(QMainWindow):
 
         Font roles and sizes live in the EASY TWEAKS block and in each
         theme's "fonts" mapping. The station name and the marquee are
-        the two big rows, both in the theme's "title" font; the station
-        name is 30% larger than before (STATION_FONT_SIZE = 31) and the
-        marquee likewise (MARQUEE_FONT_SIZE = 20).
+        the two big rows, both in the theme's "title" font.
         """
         self.station_label.setFont(theme_font("title", STATION_FONT_SIZE,
                                               True))
@@ -2670,7 +2852,10 @@ class SionicalWindow(QMainWindow):
         QApplication.instance().setStyleSheet(build_qss())
         self.rebuild_station_list()
         # Repaint the themed surfaces: the logo (tinted with the theme's
-        # text color), the hairlines, the panel and the drawer.
+        # text color), the pills (their font is the title font), the
+        # hairlines, the panel and the drawer.
+        self.format_pill.refresh()
+        self.bitrate_pill.refresh()
         self.logo.update()
         self.panel.update()
         self.shelf.update()
@@ -2707,7 +2892,13 @@ class SionicalWindow(QMainWindow):
         self.stations_toggle.arrow = "up" if self._stations_open else "down"
         self.stations_toggle.update()
         if getattr(self, "_shelf_anim", None) is not None:
-            self._shelf_anim.stop()
+            try:
+                self._shelf_anim.stop()
+            except RuntimeError:
+                # DeleteWhenStopped already freed the FINISHED
+                # animation; only its Python wrapper lingered here.
+                # Nothing to stop - just drop the stale reference.
+                pass
             self._shelf_anim = None
         animation = QVariantAnimation(self)
         animation.setDuration(280)
@@ -2904,6 +3095,9 @@ class SionicalWindow(QMainWindow):
         self.playing = True
         self.stream_ok = False
         self.station_label.setText(title)
+        # The pills start from the URL's own hints right away; the
+        # live stream's real track info follows on the next ticks.
+        self.update_stream_pills()
         # The marquee belongs to the Artist - Song metadata only; the
         # station name lives in the big title above it, once.
         self.marquee.setText("Waiting for track info from the station...")
@@ -2925,6 +3119,8 @@ class SionicalWindow(QMainWindow):
         self.stream_ok = False
         self.current_station = None
         self.station_label.setText(WINDOW_TITLE)
+        # No station, no stream info: the pills tuck themselves away.
+        self.update_stream_pills()
         self.marquee.setText("Double-click a station, drop a .pls file "
                              "anywhere, or open one with ADD PLS.")
         self.status_label.setText("Stopped.")
@@ -2961,6 +3157,24 @@ class SionicalWindow(QMainWindow):
             self.mute_button.setChecked(False)
             self.mute_button.blockSignals(False)
 
+    def update_stream_pills(self):
+        """Refresh the format / bitrate pills beside the station name.
+
+        Two sources, most honest first: the LIVE stream's track
+        description (engine.stream_info, available a few seconds into
+        playback) and the URL's own hints (probe_url_info, instant).
+        The pills hide themselves while neither knows anything.
+        """
+        fmt, kbps = None, None
+        if self.current_station:
+            fmt, kbps = probe_url_info(self.current_station[1])
+        if self.playing and self.engine is not None:
+            live_fmt, live_kbps = self.engine.stream_info()
+            fmt = live_fmt or fmt
+            kbps = live_kbps or kbps
+        self.format_pill.set_pill_text(fmt or "")
+        self.bitrate_pill.set_pill_text("%d KBPS" % kbps if kbps else "")
+
     def on_tick(self):
         """Once per second: connection status and now-playing metadata."""
         if not self.playing:
@@ -2979,6 +3193,12 @@ class SionicalWindow(QMainWindow):
         else:
             self.stream_ok = False
             self.status_label.setText("Connection lost or stopped.")
+        # Once VLC has parsed the live stream it can report the real
+        # codec and bitrate for the pills; until then they show the
+        # URL's own hints, so they are only refreshed while something
+        # is still missing.
+        if not self.format_pill.text() or not self.bitrate_pill.text():
+            self.update_stream_pills()
         title = self.current_station[0] if self.current_station else ""
         # now_playing() has already rejected stream plumbing such as a
         # bare "mp3-128" invented from the URL (see is_stream_junk), so

@@ -15,6 +15,7 @@ that feels at home on all three platforms.
 - 34 hand-crafted themes: 17 dark, 17 light
 - A real FFT visualizer (10 to 50 bars) that dances to the live audio
 - A continuously scrolling "Artist - Song" marquee, framed by subtle hairlines
+- Format and bitrate wire pills next to the station name
 - One big play/stop circle, with mute, love, and next-station controls
 - A station drawer that slides out from under the main player
 - Station favorites: hearts float loved stations to the top of the list
