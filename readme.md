@@ -11,10 +11,12 @@ that feels at home on all three platforms.
 ## Features
 
 - A fully rounded, frameless window with macOS-style traffic lights
-- 24 hand-crafted themes: 12 dark, 12 light
-- A real FFT equalizer (10 to 50 bars) that dances to the live audio
-- A continuously scrolling "Artist - Song" marquee
+- The SIONICAL RADIO text logo in the header, tinted by the theme
+- 34 hand-crafted themes: 17 dark, 17 light
+- A real FFT visualizer (10 to 50 bars) that dances to the live audio
+- A continuously scrolling "Artist - Song" marquee, framed by subtle hairlines
 - One big play/stop circle, with mute, love, and next-station controls
+- A station drawer that slides out from under the main player
 - Station favorites: hearts float loved stations to the top of the list
 - .pls playlist support: open, drag, and drop to play
 - A custom volume bar with a percent readout

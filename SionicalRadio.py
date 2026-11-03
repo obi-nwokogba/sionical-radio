@@ -5,24 +5,34 @@ Cross-platform (macOS Intel, macOS Apple Silicon, Windows; Linux works
 too), built on PySide6 and the VLC engine.
 
 DESIGN
-    A themeable glass panel with a framed look, a big circular play/stop
-    button with three smaller circular controls beneath it (mute, love
-    the station, next station), a live FFT equalizer (10, 20, 30, 40 or
-    50 bars), a large volume bar with a percent readout, and an accordion
-    station list that only appears when the STATIONS arrow is clicked.
-    The whole window is one smooth rounded rectangle (WINDOW_RADIUS
-    below) with no OS title bar: close, minimize and maximize live
-    inside the panel as traffic-light buttons, and dragging the panel
-    moves the window. Every station row starts with a heart - filled
-    and bright when loved (loved stations float to the top of the
-    list), a clear outline when not.
+    A themeable glass panel with a framed look. The header carries the
+    traffic-light buttons (close, minimize, maximize), then the
+    SIONICAL RADIO text logo (an SVG tinted with the theme), then the
+    wire band chips (10, 20, 30, 40, 50) and the THEME button, all
+    together in the top right corner. Below the header, a subtle 2 px
+    hairline frames the station name and the scrolling "Artist - Song"
+    marquee, which span the whole width of the app, with a fainter
+    hairline under the marquee. The middle row pairs the big circular
+    play/stop button (with three smaller circular controls beneath it:
+    mute, love the station, next station) with the live FFT visualizer,
+    whose bars always end on the same line as the mute / love / next
+    buttons and never grow when the window is resized. The volume bar
+    starts exactly where the visualizer starts, so both sit on one
+    invisible vertical line. The station list is a drawer that slides
+    out from UNDER the main panel when the STATIONS button is clicked,
+    with the same rounded beauty at its bottom corners. The whole
+    window is one smooth rounded rectangle (WINDOW_RADIUS below) with
+    no OS title bar; dragging the panel moves the window. Every
+    station row starts with a heart - filled and bright when loved
+    (loved stations float to the top of the list), a clear outline
+    when not.
 
 FONTS (optional but recommended)
     Drop up to five TrueType files named exactly font1.ttf, font2.ttf,
     font3.ttf, font4.ttf and font5.ttf into a "components" folder next
     to this file. Every theme assigns FOUR DIFFERENT fonts to four
     roles:
-        "brand" - the "SIONICAL RADIO" wordmark (top right)
+        "brand" - spare role (kept for custom themes.json files)
         "title" - big labels: the station name and the marquee
         "body"  - general text: buttons, station rows, status line
         "wire"  - the wire-outline buttons (band chips, THEME button)
@@ -32,19 +42,22 @@ FONTS (optional but recommended)
 ICONS (optional)
     The mute / love / next circles and the hearts in the station list
     use SVG files from the same "components" folder: unmuted.svg,
-    muted.svg, heart-outline.svg, heart-filled.svg and next.svg. They
-    are tinted with the current theme's colors at runtime. A logo file
-    named sionical-radio-logo.png (or .svg) becomes the window icon;
-    the build scripts also turn it into the launcher and installer
-    icon (SionicalRadio.icns on macOS, SionicalRadio.ico on Windows).
+    muted.svg, heart-outline.svg, heart-filled.svg and next.svg. The
+    header text logo is loaded from sionical-text-logo.svg (or
+    sionical_text_only_logo_black.svg - both names work) and tinted
+    with the theme's text color. A logo file named
+    sionical-radio-logo.png (or .svg) becomes the window icon; the
+    build scripts also turn it into the launcher and installer icon
+    (SionicalRadio.icns on macOS, SionicalRadio.ico on Windows).
     Missing files fall back to built-in painted shapes.
 
 THEMES
-    Twenty-four themes are embedded below as JSON: twelve dark themes
-    followed by twelve light themes. If the file components/themes.json
-    exists, it replaces them all, so you can restyle the app without
-    touching this code. The wire THEME button (top right) shows the
-    current theme's name and cycles through the list at runtime.
+    Thirty-four themes are embedded below as JSON: seventeen dark
+    themes followed by seventeen light themes. If the file
+    components/themes.json exists, it replaces them all, so you can
+    restyle the app without touching this code. The wire THEME button
+    (top right) shows the current theme's name and cycles through the
+    list at runtime.
 
 SETUP (development machine only)
     pip install -r requirements.txt
@@ -121,11 +134,11 @@ except (ImportError, OSError):
 from PySide6.QtCore import (
     QEasingCurve,
     QPointF,
-    QPropertyAnimation,
     QRectF,
     QSize,
     Qt,
     QTimer,
+    QVariantAnimation,
     Signal,
 )
 from PySide6.QtGui import (
@@ -364,6 +377,66 @@ THEMES_JSON = """
     }
   },
   {
+    "name": "Deep Crimson",
+    "fonts": { "brand": "font2", "title": "font4", "body": "font1",
+               "wire": "font3" },
+    "colors": {
+      "bg_top": "#26060D", "bg_bottom": "#110307",
+      "panel": "#38101B", "border": "#D93656",
+      "accent": "#F0556F", "accent2": "#FCA5B5",
+      "deep": "#9F1239", "text": "#FFE4E9",
+      "glow": "#FB7185", "icon": "#FFFFFF"
+    }
+  },
+  {
+    "name": "Indigo Dusk",
+    "fonts": { "brand": "font3", "title": "font1", "body": "font5",
+               "wire": "font4" },
+    "colors": {
+      "bg_top": "#101537", "bg_bottom": "#070A1E",
+      "panel": "#1A224D", "border": "#6366F1",
+      "accent": "#818CF8", "accent2": "#C7D2FE",
+      "deep": "#3730A3", "text": "#E0E7FF",
+      "glow": "#818CF8", "icon": "#FFFFFF"
+    }
+  },
+  {
+    "name": "Copper Night",
+    "fonts": { "brand": "font5", "title": "font2", "body": "font3",
+               "wire": "font1" },
+    "colors": {
+      "bg_top": "#221208", "bg_bottom": "#100804",
+      "panel": "#33200F", "border": "#C2743C",
+      "accent": "#E8935A", "accent2": "#FBD0A8",
+      "deep": "#9A5B2B", "text": "#FBEAD5",
+      "glow": "#EFA96B", "icon": "#FFFFFF"
+    }
+  },
+  {
+    "name": "Pine Hollow",
+    "fonts": { "brand": "font4", "title": "font3", "body": "font2",
+               "wire": "font5" },
+    "colors": {
+      "bg_top": "#08170F", "bg_bottom": "#030B06",
+      "panel": "#0F2418", "border": "#2F9E63",
+      "accent": "#34D17D", "accent2": "#A7F3CF",
+      "deep": "#166534", "text": "#DCFCE8",
+      "glow": "#4ADE80", "icon": "#FFFFFF"
+    }
+  },
+  {
+    "name": "Storm Harbor",
+    "fonts": { "brand": "font1", "title": "font5", "body": "font4",
+               "wire": "font2" },
+    "colors": {
+      "bg_top": "#131A26", "bg_bottom": "#080C14",
+      "panel": "#1D2739", "border": "#64748B",
+      "accent": "#94A3B8", "accent2": "#CBD5E1",
+      "deep": "#475569", "text": "#E2E8F0",
+      "glow": "#9FB3C8", "icon": "#FFFFFF"
+    }
+  },
+  {
     "name": "Daylight Blue",
     "fonts": { "brand": "font4", "title": "font2", "body": "font1",
                "wire": "font5" },
@@ -506,6 +579,66 @@ THEMES_JSON = """
       "deep": "#BE123C", "text": "#881337",
       "glow": "#FB7185", "icon": "#FFFFFF"
     }
+  },
+  {
+    "name": "Porcelain Ivory",
+    "fonts": { "brand": "font3", "title": "font2", "body": "font4",
+               "wire": "font1" },
+    "colors": {
+      "bg_top": "#FDFBF7", "bg_bottom": "#F1ECE1",
+      "panel": "#FFFEFA", "border": "#CFC5B0",
+      "accent": "#8C5E3C", "accent2": "#B08557",
+      "deep": "#6E4526", "text": "#4A3B2A",
+      "glow": "#C8A27A", "icon": "#FFFFFF"
+    }
+  },
+  {
+    "name": "Sunrise Blush",
+    "fonts": { "brand": "font2", "title": "font5", "body": "font1",
+               "wire": "font4" },
+    "colors": {
+      "bg_top": "#FFF1EC", "bg_bottom": "#FFDCD2",
+      "panel": "#FFFAF7", "border": "#F2B8A0",
+      "accent": "#E5484D", "accent2": "#F4795B",
+      "deep": "#BE3E4B", "text": "#7C2D2E",
+      "glow": "#FB9E8C", "icon": "#FFFFFF"
+    }
+  },
+  {
+    "name": "Meadow Light",
+    "fonts": { "brand": "font4", "title": "font1", "body": "font3",
+               "wire": "font2" },
+    "colors": {
+      "bg_top": "#F0F9E8", "bg_bottom": "#DDEECB",
+      "panel": "#F8FDF2", "border": "#A3C47C",
+      "accent": "#5B9B3A", "accent2": "#7DB94F",
+      "deep": "#3F7A28", "text": "#33531F",
+      "glow": "#8CCB5E", "icon": "#FFFFFF"
+    }
+  },
+  {
+    "name": "Moonlit Silver",
+    "fonts": { "brand": "font5", "title": "font3", "body": "font2",
+               "wire": "font4" },
+    "colors": {
+      "bg_top": "#F2F5F9", "bg_bottom": "#DCE3EC",
+      "panel": "#F9FBFE", "border": "#AEBFCE",
+      "accent": "#52657A", "accent2": "#6E8399",
+      "deep": "#3B4A5C", "text": "#2E3B49",
+      "glow": "#8AA1B8", "icon": "#FFFFFF"
+    }
+  },
+  {
+    "name": "Frost Aqua",
+    "fonts": { "brand": "font1", "title": "font4", "body": "font5",
+               "wire": "font3" },
+    "colors": {
+      "bg_top": "#ECFAFB", "bg_bottom": "#D2EEF2",
+      "panel": "#F5FEFF", "border": "#93CCD6",
+      "accent": "#17A2B0", "accent2": "#34C3CF",
+      "deep": "#0F7E8C", "text": "#0B5560",
+      "glow": "#4FD2DF", "icon": "#FFFFFF"
+    }
   }
 ]
 """
@@ -540,17 +673,30 @@ WINDOW_RADIUS = 25.0    # corner radius of the outermost window frame
 PANEL_RADIUS = 18.0     # corner radius of the inner glass panel
 PANEL_INSET = 9.0       # gap between the window edge and the glass panel
 PLAY_BUTTON = 150       # diameter (px) of the big play/stop circle
-SMALL_BUTTON = 46        # diameter (px) of the mute / love / next circles
-EQ_TICK_MS = 16         # equalizer refresh rate (16 ms is about 60 fps)
+SMALL_BUTTON = 46       # diameter (px) of the mute / love / next circles
+CONTROLS_GAP = 12       # gap (px) between the big circle and the circles
+LOGO_HEIGHT = 26        # height (px) of the SIONICAL RADIO text logo
+LOGO_GAP = 40           # air (px) between the green window button and
+                        # the text logo
+# The visualizer column is fixed to exactly the height of the play
+# column, so the bottom of the bars always sits on the same line as
+# the bottom of the mute / love / next buttons and NEVER grows when
+# the window is resized.
+EQ_HEIGHT = PLAY_BUTTON + CONTROLS_GAP + SMALL_BUTTON
+EQ_TICK_MS = 16         # visualizer refresh rate (16 ms is about 60 fps)
 EQ_ATTACK = 0.30        # how fast a bar rises toward a louder target
 EQ_RELEASE = 0.07       # how slowly a bar falls toward a quieter target
-EQ_BAR_OPACITY = 0.60   # 0..1 opacity of the equalizer bars (60%)
+EQ_BAR_OPACITY = 0.60   # 0..1 opacity of the visualizer bars (60%)
 MARQUEE_FONT_SIZE = 20  # marquee ("Artist - Song") font size in points
 STATION_FONT_SIZE = 31  # station name font size in points
 ICON_PAD = 10           # px of padding inside the small circles, all the
                         # way round their SVG icons (the icon is this
                         # much smaller than the button on every side)
 ROW_ICON = 16           # side (px) of the SVG hearts in the station rows
+HAIRLINE_TOP_ALPHA = 110    # the 2 px line above the station name (0-255)
+HAIRLINE_BOTTOM_ALPHA = 55  # the fainter 2 px line below the marquee
+SHELF_AREA = 176        # visible height (px) of the stations drawer
+SHELF_OVERLAP = 26      # how far (px) the drawer tucks under the panel
 
 
 def components_dir():
@@ -734,6 +880,53 @@ def svg_icon(name, color, size):
     pixmap.setDevicePixelRatio(2.0)
     _ICON_CACHE[key] = pixmap
     return pixmap
+
+
+# The header text logo: a wide SVG ("sionicalradio" in Gobold uplow),
+# black-on-transparent like the other SVGs. Either file name works;
+# drop it into the components folder.
+LOGO_ASPECT = 542.0 / 129.0  # width / height of the text logo SVG
+LOGO_FILENAMES = ("sionical-text-logo.svg",
+                  "sionical_text_only_logo_black.svg")
+
+
+def svg_text_logo(color, height):
+    """Return the wide text-logo pixmap tinted with `color`, or None.
+
+    Works exactly like svg_icon() - render, then one
+    CompositionMode_SourceIn fill - but keeps the SVG's wide 542 x 129
+    aspect ratio instead of a square. Rendered at 2x for HiDPI screens
+    and cached per (file, color, height), so theme switches just pick
+    the new color from the cache.
+    """
+    if QSvgRenderer is None or height <= 0:
+        return None
+    for name in LOGO_FILENAMES:
+        path = os.path.join(components_dir(), name)
+        if not os.path.isfile(path):
+            continue
+        key = (path, color.name(), color.alpha(), float(height))
+        if key in _ICON_CACHE:
+            return _ICON_CACHE[key]
+        renderer = QSvgRenderer(path)
+        if not renderer.isValid():
+            continue
+        pixels_w = max(2, int(round(height * LOGO_ASPECT * 2.0)))
+        pixels_h = max(2, int(round(height * 2.0)))
+        image = QImage(pixels_w, pixels_h, QImage.Format_ARGB32_Premultiplied)
+        image.fill(Qt.transparent)
+        painter = QPainter(image)
+        renderer.render(painter)
+        painter.end()
+        painter = QPainter(image)
+        painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+        painter.fillRect(image.rect(), color)
+        painter.end()
+        pixmap = QPixmap.fromImage(image)
+        pixmap.setDevicePixelRatio(2.0)
+        _ICON_CACHE[key] = pixmap
+        return pixmap
+    return None
 
 
 def app_icon():
@@ -1206,30 +1399,57 @@ class PanelFrame(QWidget):
     """The glassy rounded frame drawn around the whole interface.
 
     The window itself is translucent and frameless (see SionicalWindow),
-    so this widget is what the user sees as "the window". It paints TWO
-    rounded rectangles:
-      1. the OUTER one: the whole window, with the theme's background
+    so this widget is what the user sees as "the main player". It
+    paints TWO rounded rectangles:
+      1. the OUTER one: the window body, with the theme's background
          gradient and a smooth WINDOW_RADIUS (25 px) on every corner -
          this is what gives the app its fully rounded silhouette.
       2. the INNER one: the glass panel, inset by PANEL_INSET px, with
          a gentler PANEL_RADIUS - the "rounded rectangle inside" look.
 
+    DRAWER MODE: while the stations drawer (StationShelf) is out, the
+    window body continues below this frame. Both rounded rects are then
+    extended past the frame's bottom edge, and the widget's own
+    clipping cuts them off - so the bottom corners, the bottom border
+    and the inner panel's bottom line all vanish, and the silhouette
+    flows straight into the drawer with no seam. Both gradients are
+    mapped in ABSOLUTE window coordinates (the full open height), so
+    the panel and the drawer always sample one continuous body of
+    color.
+
     To change the look, tune WINDOW_RADIUS / PANEL_RADIUS / PANEL_INSET
     in the EASY TWEAKS block near the top of this file.
     """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._bottom_open = False
+
+    def set_bottom_open(self, opened):
+        """Switch between closed (rounded bottom) and drawer mode."""
+        if bool(opened) != self._bottom_open:
+            self._bottom_open = bool(opened)
+            self.update()
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         widget = QRectF(self.rect())
+        win_h = float(self.window().height())
+
+        # In drawer mode, push both rects below the frame by more than
+        # the corner radius: the widget clips the overflow away, which
+        # squares off the bottom corners and hides the bottom strokes
+        # (the drawer continues them instead).
+        drop = (WINDOW_RADIUS + 2.0) if self._bottom_open else 0.0
 
         # ---- 1) the outer rounded window -------------------------------
         # Covers almost the whole widget (a 1 px hairline of air so the
         # border sits fully inside the window). Everything outside this
         # rounded rect is genuinely transparent, which is what rounds
         # the corners of the OS window itself.
-        outer = widget.adjusted(1.0, 1.0, -1.0, -1.0)
-        window_fill = QLinearGradient(outer.topLeft(), outer.bottomLeft())
+        outer = widget.adjusted(1.0, 1.0, -1.0, -1.0 + drop)
+        window_fill = QLinearGradient(QPointF(0.0, 0.0), QPointF(0.0, win_h))
         window_fill.setColorAt(0.0, col("bg_top"))
         window_fill.setColorAt(1.0, col("bg_bottom"))
         painter.setPen(QPen(col("border", 170), 1.2))
@@ -1242,8 +1462,9 @@ class PanelFrame(QWidget):
         # the window gradient behind it, is what makes each theme's
         # panel visibly distinct instead of a washed-out gray.
         rect = widget.adjusted(PANEL_INSET, PANEL_INSET,
-                              -PANEL_INSET, -PANEL_INSET)
-        fill = QLinearGradient(rect.topLeft(), rect.bottomLeft())
+                              -PANEL_INSET, -PANEL_INSET + drop)
+        fill = QLinearGradient(QPointF(0.0, PANEL_INSET),
+                               QPointF(0.0, win_h - PANEL_INSET))
         fill.setColorAt(0.0, col("panel", 242))
         fill.setColorAt(1.0, col("bg_bottom", 216))
         painter.setPen(QPen(col("border", 110), 1.0))
@@ -1856,7 +2077,10 @@ class EqualizerWidget(QWidget):
         # gap proportionally so the bars never touch.
         gap = min(10.0, slot * 0.45)
         bar_width = max(4.0, slot - gap)
-        bottom = rect.bottom() - 3.0
+        # The bars end EXACTLY on the widget's bottom edge, which is
+        # the same line the mute / love / next buttons end on (the
+        # middle row is exactly EQ_HEIGHT tall).
+        bottom = rect.bottom()
         top = rect.top() + 3.0
         usable = bottom - top
 
@@ -1921,6 +2145,51 @@ class MarqueeLabel(QLabel):
             painter.drawText(QRectF(x, 0.0, advance + 8.0, rect.height()),
                              Qt.AlignVCenter | Qt.AlignLeft, self.text())
             x += advance + self.GAP
+
+
+class LogoLabel(QWidget):
+    """The SIONICAL RADIO text logo, tinted with the theme.
+
+    Loads the wide wordmark SVG from the components folder
+    (svg_text_logo) and repaints it with the theme's TEXT color on
+    every paint, so cycling themes recolors the logo instantly. Fixed
+    to LOGO_HEIGHT tall (EASY TWEAKS); the width follows the SVG's
+    542 x 129 aspect ratio. If the file is missing the widget simply
+    paints nothing - the traffic lights still show and nothing breaks.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(int(round(LOGO_HEIGHT * LOGO_ASPECT)), LOGO_HEIGHT)
+
+    def paintEvent(self, event):
+        pixmap = svg_text_logo(col("text"), LOGO_HEIGHT)
+        if pixmap is None:
+            return
+        painter = QPainter(self)
+        painter.drawPixmap(0, 0, pixmap)
+
+
+class Hairline(QWidget):
+    """A full-width 2 px divider, tinted with the theme's border color.
+
+    Two of these frame the big text rows: a subtle one above the
+    station name and an even fainter one below the marquee. The alpha
+    (0..255) sets how faint the line is - tune HAIRLINE_TOP_ALPHA and
+    HAIRLINE_BOTTOM_ALPHA in the EASY TWEAKS block.
+    """
+
+    def __init__(self, alpha, parent=None):
+        super().__init__(parent)
+        self._alpha = int(alpha)
+        self.setFixedHeight(2)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        rect = QRectF(self.rect())
+        painter.setPen(QPen(col("border", self._alpha), 2.0))
+        painter.drawLine(QPointF(rect.left() + 1.0, 1.0),
+                         QPointF(rect.right() - 1.0, 1.0))
 
 
 class WindowButton(QPushButton):
@@ -2058,6 +2327,84 @@ class IconButton(QPushButton):
 
 
 # ---------------------------------------------------------------------------
+# THE STATION DRAWER
+# ---------------------------------------------------------------------------
+
+class StationShelf(QWidget):
+    """The station drawer that slides out from under the main panel.
+
+    The shelf is a sibling of PanelFrame inside the window's central
+    canvas (a plain, transparent QWidget). PanelFrame paints the main
+    player, this widget paints the protrusion below it, and together
+    they read as ONE continuous glass body:
+
+      * the fills use the SAME window gradients as PanelFrame, mapped
+        in absolute window coordinates, so there is no seam or color
+        boundary where the panel ends - the drawer looks like it slid
+        out of the very same glass;
+      * the bottom corners are rounded with WINDOW_RADIUS (and the
+        inner glass panel's with PANEL_RADIUS) - the same beauty as the
+        main window - while the top of the shelf tucks
+        SHELF_OVERLAP px under the panel;
+      * no border is drawn along the top edge: the panel's left and
+        right borders continue straight into the drawer's.
+
+    The rounded rects are extended ABOVE this widget by more than
+    SHELF_OVERLAP, and the widget's own clipping cuts the overflow
+    away - so only the rounded bottom corners and the side borders
+    ever show. The station list is pinned to the bottom of the shelf
+    with a stretch above it, so while the drawer animates open the
+    rows emerge from under the main panel exactly like a drawer being
+    pulled out. SionicalWindow places and resizes this widget (see
+    _place_frame_children) and drives the slide with a
+    QVariantAnimation.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setVisible(False)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 0, 12, 8)
+        layout.setSpacing(0)
+        # The stretch pins the list to the bottom: the rows appear
+        # from under the panel while the shelf grows downward.
+        layout.addStretch(1)
+        self.station_list = QListWidget()
+        self.station_list.setFixedHeight(SHELF_AREA)
+        layout.addWidget(self.station_list)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        widget = QRectF(self.rect())
+        win_h = float(self.window().height())
+        y_off = float(self.y())
+
+        # ---- 1) the outer window body, continued -----------------------
+        lift = SHELF_OVERLAP + WINDOW_RADIUS + 2.0
+        outer = widget.adjusted(1.0, -lift, -1.0, -1.0)
+        window_fill = QLinearGradient(QPointF(0.0, -y_off),
+                                      QPointF(0.0, win_h - y_off))
+        window_fill.setColorAt(0.0, col("bg_top"))
+        window_fill.setColorAt(1.0, col("bg_bottom"))
+        painter.setPen(QPen(col("border", 170), 1.2))
+        painter.setBrush(window_fill)
+        painter.drawPath(rounded_path(outer, WINDOW_RADIUS))
+
+        # ---- 2) the inner glass panel, continued -----------------------
+        inner_lift = SHELF_OVERLAP + PANEL_RADIUS + 2.0
+        rect = widget.adjusted(PANEL_INSET, -inner_lift,
+                               -PANEL_INSET, -PANEL_INSET)
+        fill = QLinearGradient(QPointF(0.0, PANEL_INSET - y_off),
+                               QPointF(0.0, win_h - PANEL_INSET - y_off))
+        fill.setColorAt(0.0, col("panel", 242))
+        fill.setColorAt(1.0, col("bg_bottom", 216))
+        painter.setPen(QPen(col("border", 110), 1.0))
+        painter.setBrush(fill)
+        painter.drawPath(rounded_path(rect, PANEL_RADIUS))
+
+
+# ---------------------------------------------------------------------------
 # MAIN WINDOW
 # ---------------------------------------------------------------------------
 
@@ -2077,7 +2424,10 @@ class SionicalWindow(QMainWindow):
         # be an opaque square and the rounding would be invisible.
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.resize(840, 560)
-        self.setMinimumSize(660, 470)
+        # The middle row (play column + visualizer) now keeps a FIXED
+        # height (EQ_HEIGHT), so the window needs a slightly taller
+        # floor than before to fit every row comfortably.
+        self.setMinimumSize(660, 520)
         self.setAcceptDrops(True)
 
         self.engine = None
@@ -2085,6 +2435,12 @@ class SionicalWindow(QMainWindow):
         self.playing = False
         self.stream_ok = False
         self._stations_open = False
+        # The station drawer: how far it has slid out from under the
+        # panel (0 = closed). _panel_h is the main panel's height,
+        # maintained by _place_frame_children().
+        self._shelf_extent = 0.0
+        self._shelf_anim = None
+        self._panel_h = 560
         # Volume remembered from before the last mute, so the mute
         # button can restore it.
         self._volume_before_mute = 80
@@ -2110,16 +2466,28 @@ class SionicalWindow(QMainWindow):
     # ---- UI construction ---------------------------------------------
 
     def _build_ui(self):
-        central = PanelFrame()
-        self.setCentralWidget(central)
-        root = QVBoxLayout(central)
+        # The central widget is a plain, transparent canvas. PanelFrame
+        # (the main player) and StationShelf (the drawer) are children
+        # of the canvas, placed manually by _place_frame_children(): a
+        # layout would stretch one widget over the whole window, but the
+        # drawer must sit BELOW the panel's rounded bottom, like a tray
+        # pulled out from under it.
+        canvas = QWidget()
+        self.setCentralWidget(canvas)
+        self.panel = PanelFrame(canvas)
+        self.shelf = StationShelf(canvas)
+        self.shelf.lower()  # the drawer slides out from UNDER the panel
+
+        self.station_list = self.shelf.station_list
+        self.station_list.itemDoubleClicked.connect(
+            self.on_item_double_clicked)
+
+        root = QVBoxLayout(self.panel)
         root.setContentsMargins(28, 24, 28, 20)
         root.setSpacing(12)
 
-        # == header: window controls + station name (left), brand + theme
-        # (right). The marquee is deliberately NOT in this row: it gets
-        # its own full-width row right below the header, so the
-        # "Artist - Song" line has a lot of width to travel across.
+        # == header: traffic lights + the text logo (left), then the
+        # band chips and the THEME button, all together (top right).
         header = QHBoxLayout()
         header.setSpacing(14)
 
@@ -2138,27 +2506,45 @@ class SionicalWindow(QMainWindow):
         win_row.addWidget(self.maximize_button)
         header.addLayout(win_row)
 
-        self.station_label = QLabel(WINDOW_TITLE)
-        header.addWidget(self.station_label)
+        # The SIONICAL RADIO text logo, LOGO_GAP (40) px to the right
+        # of the green window button and tinted with the theme.
+        header.addSpacing(LOGO_GAP)
+        self.logo = LogoLabel()
+        header.addWidget(self.logo)
         header.addStretch(1)
 
-        header_right = QVBoxLayout()
-        header_right.setSpacing(6)
-        self.brand_label = QLabel(WINDOW_TITLE)
-        header_right.addWidget(self.brand_label, 0, Qt.AlignRight)
+        # The wire band chips (10..50) plus the THEME button, all
+        # together in the top right corner.
+        self._band_buttons = {}
+        for count in EqualizerWidget.BAND_CHOICES:
+            chip = GradientButton(str(count), "wire")
+            chip.setChecked(count == 20)
+            chip.clicked.connect(
+                lambda checked, c=count: self.on_band_clicked(c))
+            header.addWidget(chip)
+            self._band_buttons[count] = chip
+        header.addSpacing(6)
         self.theme_button = GradientButton("THEME", "wire", checkable=False)
         self.theme_button.clicked.connect(self.on_theme_clicked)
-        header_right.addWidget(self.theme_button, 0, Qt.AlignRight)
-        header.addLayout(header_right)
+        header.addWidget(self.theme_button)
         root.addLayout(header)
 
-        # == marquee: full panel width, so long track lines breathe ===
+        # == the two big text rows, full width, framed by hairlines ===
+        self.hairline_top = Hairline(HAIRLINE_TOP_ALPHA)
+        root.addWidget(self.hairline_top)
+        self.station_label = QLabel(WINDOW_TITLE)
+        root.addWidget(self.station_label)
         self.marquee = MarqueeLabel(
             "Double-click a station, drop a .pls file anywhere, "
             "or open one with ADD PLS.")
         root.addWidget(self.marquee)
+        self.hairline_bottom = Hairline(HAIRLINE_BOTTOM_ALPHA)
+        root.addWidget(self.hairline_bottom)
 
-        # == middle: play column (big circle + 3 small circles) + equalizer
+        # == middle: play column (big circle + 3 small circles) + the
+        # visualizer. The row keeps its NATURAL height (no stretch), so
+        # the bars never grow when the window is resized and their
+        # bottom always sits on the same line as the small circles.
         mid = QHBoxLayout()
         mid.setSpacing(18)
 
@@ -2166,11 +2552,9 @@ class SionicalWindow(QMainWindow):
         # three circular controls - MUTE, LOVE (heart the station) and
         # NEXT. Three 46 px buttons plus two 6 px gaps add up to the
         # big circle's 150 px width, so the row is exactly as wide as
-        # the play button above it. The stretch above and below keeps
-        # the pair vertically centered next to the equalizer.
+        # the play button above it.
         play_col = QVBoxLayout()
-        play_col.setSpacing(12)
-        play_col.addStretch(1)
+        play_col.setSpacing(CONTROLS_GAP)
         self.play_button = PlayCircleButton()
         self.play_button.clicked.connect(self.on_play_clicked)
         play_col.addWidget(self.play_button, 0, Qt.AlignHCenter)
@@ -2187,54 +2571,37 @@ class SionicalWindow(QMainWindow):
         self.next_button.clicked.connect(self.on_next_station)
         small_row.addWidget(self.next_button)
         play_col.addLayout(small_row)
-        play_col.addStretch(1)
         mid.addLayout(play_col)
 
-        eq_column = QVBoxLayout()
-        eq_column.setSpacing(6)
-        eq_top = QHBoxLayout()
-        self.eq_label = QLabel("EQUALIZER")
-        eq_top.addWidget(self.eq_label)
-        eq_top.addStretch(1)
-        self._band_buttons = {}
-        for count in EqualizerWidget.BAND_CHOICES:
-            chip = GradientButton(str(count), "wire")
-            chip.setChecked(count == 20)
-            chip.clicked.connect(
-                lambda checked, c=count: self.on_band_clicked(c))
-            eq_top.addWidget(chip)
-            self._band_buttons[count] = chip
-        eq_column.addLayout(eq_top)
+        # The visualizer: fixed to EQ_HEIGHT (exactly the play column's
+        # height), so its bars start level with the top of the big play
+        # circle and end level with the bottom of the mute / love /
+        # next buttons - on one invisible line, at any window size.
         self.equalizer = EqualizerWidget()
-        eq_column.addWidget(self.equalizer, 1)
-        mid.addLayout(eq_column, 1)
-        root.addLayout(mid, 1)
+        self.equalizer.setFixedHeight(EQ_HEIGHT)
+        mid.addWidget(self.equalizer, 1)
+        root.addLayout(mid)
 
-        # == volume: label with percent + large bar =======================
+        # Extra window height (resize or zoom) gathers here, above the
+        # volume bar - the middle row never changes.
+        root.addStretch(1)
+
+        # == volume: the percent label sits under the play column and
+        # the bar starts exactly where the visualizer starts, because
+        # both rows are [a PLAY_BUTTON-wide slot][18 px][the rest].
         vol_row = QHBoxLayout()
-        vol_row.setSpacing(12)
+        vol_row.setSpacing(18)
         self.volume_label = QLabel("VOLUME 80%")
+        self.volume_label.setFixedWidth(PLAY_BUTTON)
         vol_row.addWidget(self.volume_label, 0, Qt.AlignVCenter)
         self.volume = VolumeBar()
         self.volume.valueChanged.connect(self.on_volume_changed)
         vol_row.addWidget(self.volume, 1)
         root.addLayout(vol_row)
 
-        # == collapsible station list (accordion) =========================
-        self.stations_panel = QWidget()
-        panel_layout = QVBoxLayout(self.stations_panel)
-        panel_layout.setContentsMargins(0, 0, 0, 0)
-        self.stations_panel.setMaximumHeight(0)
-        self.station_list = QListWidget()
-        self.station_list.itemDoubleClicked.connect(self.on_item_double_clicked)
-        panel_layout.addWidget(self.station_list)
-        # Stretch 1 (and no fixed spacer above it): when the list opens
-        # it grows up from the bottom bar, and while it is closed the
-        # equalizer section takes the free space instead - so there is
-        # never a permanent empty strip under the volume bar.
-        root.addWidget(self.stations_panel, 1)
-
-        # == bottom bar: status (left), actions (right) ====================
+        # == bottom bar: status (left), actions (right) ================
+        # The STATIONS button toggles the drawer that protrudes from
+        # the bottom of the app (see on_toggle_stations).
         bottom = QHBoxLayout()
         bottom.setSpacing(10)
         self.status_label = QLabel("Ready.")
@@ -2250,6 +2617,32 @@ class SionicalWindow(QMainWindow):
         bottom.addWidget(self.add_stream_button)
         root.addLayout(bottom)
 
+        self._place_frame_children()
+
+    def resizeEvent(self, event):
+        """Keep the panel and the drawer placed after any resize."""
+        super().resizeEvent(event)
+        if hasattr(self, "panel"):
+            self._place_frame_children()
+
+    def _place_frame_children(self):
+        """Position the main panel and the drawer inside the canvas.
+
+        The drawer's "extent" is how far it has slid out (0 when
+        closed). Its top SHELF_OVERLAP px tuck under the panel, so the
+        window height grows only by the part that is actually visible.
+        """
+        extent = int(round(self._shelf_extent))
+        visible = max(0, extent - SHELF_OVERLAP)
+        w = self.width()
+        self._panel_h = max(1, self.height() - visible)
+        self.panel.setGeometry(0, 0, w, self._panel_h)
+        shelf_out = extent > SHELF_OVERLAP
+        self.shelf.setGeometry(0, self._panel_h - SHELF_OVERLAP, w,
+                               max(1, extent))
+        self.shelf.setVisible(shelf_out)
+        self.panel.set_bottom_open(shelf_out)
+
     # ---- theming -------------------------------------------------------
 
     def apply_theme(self):
@@ -2259,20 +2652,13 @@ class SionicalWindow(QMainWindow):
         theme's "fonts" mapping. The station name and the marquee are
         the two big rows, both in the theme's "title" font; the station
         name is 30% larger than before (STATION_FONT_SIZE = 31) and the
-        marquee likewise (MARQUEE_FONT_SIZE = 20). The wordmark uses
-        the dedicated "brand" font.
+        marquee likewise (MARQUEE_FONT_SIZE = 20).
         """
         self.station_label.setFont(theme_font("title", STATION_FONT_SIZE,
                                               True))
         self.station_label.setStyleSheet("color: %s;"
                                          % THEME["colors"]["accent"])
-        self.brand_label.setFont(theme_font("brand", 10, True, 3.0))
-        self.brand_label.setStyleSheet("color: %s;"
-                                       % THEME["colors"]["accent2"])
         self.marquee.setFont(theme_font("title", MARQUEE_FONT_SIZE))
-        self.eq_label.setFont(theme_font("body", 9, True, 2.0))
-        self.eq_label.setStyleSheet("color: %s;"
-                                    % THEME["colors"]["accent2"])
         self.volume_label.setFont(theme_font("body", 10, True, 2.0))
         self.volume_label.setStyleSheet("color: %s;"
                                         % THEME["colors"]["accent2"])
@@ -2283,6 +2669,11 @@ class SionicalWindow(QMainWindow):
         self.theme_button.setText("THEME : %s" % THEME["name"].upper())
         QApplication.instance().setStyleSheet(build_qss())
         self.rebuild_station_list()
+        # Repaint the themed surfaces: the logo (tinted with the theme's
+        # text color), the hairlines, the panel and the drawer.
+        self.logo.update()
+        self.panel.update()
+        self.shelf.update()
         self.update()
 
     def on_theme_clicked(self):
@@ -2301,21 +2692,47 @@ class SionicalWindow(QMainWindow):
             chip.setChecked(other == count)
         self.equalizer.set_band_count(count)
 
-    # ---- accordion ---------------------------------------------------------
+    # ---- the station drawer ------------------------------------------------
 
     def on_toggle_stations(self):
-        """Expand or collapse the station list with a smooth animation."""
+        """Slide the station drawer out from under the panel, or in.
+
+        The drawer is a protrusion from the bottom of the app: the
+        window itself grows downward, so the list genuinely looks like
+        it slid out from UNDER the main player. The QVariantAnimation
+        drives _set_shelf_extent, which both resizes the window and
+        re-places the panel and the drawer each frame.
+        """
         self._stations_open = not self._stations_open
         self.stations_toggle.arrow = "up" if self._stations_open else "down"
         self.stations_toggle.update()
-        animation = QPropertyAnimation(
-            self.stations_panel, b"maximumHeight", self)
-        animation.setDuration(230)
-        animation.setEndValue(170 if self._stations_open else 0)
+        if getattr(self, "_shelf_anim", None) is not None:
+            self._shelf_anim.stop()
+            self._shelf_anim = None
+        animation = QVariantAnimation(self)
+        animation.setDuration(280)
+        animation.setStartValue(float(self._shelf_extent))
+        animation.setEndValue(
+            float(SHELF_AREA + SHELF_OVERLAP) if self._stations_open
+            else 0.0)
         animation.setEasingCurve(QEasingCurve.OutCubic)
-        animation.start(QPropertyAnimation.DeleteWhenStopped)
+        animation.valueChanged.connect(self._set_shelf_extent)
+        self._shelf_anim = animation
+        animation.start(QVariantAnimation.DeleteWhenStopped)
         if self._stations_open and self.station_list.count():
             self.station_list.setCurrentRow(0)
+
+    def _set_shelf_extent(self, value):
+        """One animation frame: grow (or shrink) the window for the
+        drawer and re-place the panel and the shelf."""
+        self._shelf_extent = float(value)
+        extent = int(round(self._shelf_extent))
+        visible = max(0, extent - SHELF_OVERLAP)
+        target_h = self._panel_h + visible
+        if target_h != self.height():
+            self.resize(self.width(), target_h)
+        else:
+            self._place_frame_children()
 
     # ---- stations --------------------------------------------------------
 
