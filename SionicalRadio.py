@@ -7,7 +7,8 @@ too), built on PySide6 and the VLC engine.
 DESIGN
     A themeable glass panel with a framed look. The header carries the
     traffic-light buttons (close, minimize, maximize), then the
-    SIONICAL RADIO text logo (an SVG tinted with the theme), then the
+    SIONICAL RADIO text logo (an SVG tinted with the theme at 60%
+    opacity), then the
     wire band chips (10, 20, 30, 40, 50) and the THEME button, all
     together in the top right corner. Below the header, a subtle 2 px
     hairline frames the station name and the scrolling "Artist - Song"
@@ -22,7 +23,14 @@ DESIGN
     starts exactly where the visualizer starts, so both sit on one
     invisible vertical line. The station list is a drawer that slides
     out from UNDER the main panel when the STATIONS button is clicked,
-    with the same rounded beauty at its bottom corners. The whole
+    with the same rounded beauty at its bottom corners. Any extra
+    window height (a manual resize or zoom) grows the drawer's list
+    - the player itself never stretches. The visualizer chip next to
+    the band numbers cycles SEVEN drawing styles, all riding the very
+    same band data: three smooth CURVES (thin, regular, bold), two
+    vertical bar styles (regular, and thin at a quarter of the width)
+    and two HORIZONTAL bar styles (based on the left edge, pumping
+    right; one in the regular color, one more transparent). The whole
     window is one smooth rounded rectangle (WINDOW_RADIUS below) with
     no OS title bar; dragging the panel moves the window. Every
     station row starts with a heart - filled and bright when loved
@@ -54,8 +62,11 @@ ICONS (optional)
     Missing files fall back to built-in painted shapes.
 
 THEMES
-    Thirty-four themes are embedded below as JSON: seventeen dark
-    themes followed by seventeen light themes. If the file
+    Forty-nine themes are embedded below as JSON: seventeen dark
+    themes, seventeen light themes, and fifteen mid-range themes -
+    softer palettes in which every color's HSL lightness sits between
+    25 and 75, each with its own hue, for people who want less
+    contrast. If the file
     components/themes.json exists, it replaces them all, so you can
     restyle the app without touching this code. The wire THEME button
     (top right) shows the current theme's name and cycles through the
@@ -72,8 +83,12 @@ RUN
     python SionicalRadio.py station.pls   (opens the file and plays)
 
 BUILD A DISTRIBUTABLE APP
-    macOS:  ./build-mac.sh   (bundles the components folder too)
-    Windows and details: see the Setup and Build Guide, section 5.
+    macOS:   ./build-mac-intel.sh    (Intel Macs; makes a DMG)
+             ./build-mac-silicon.sh  (Apple Silicon Macs; makes a DMG)
+    Windows: powershell -ExecutionPolicy Bypass -File .\build-windows.ps1
+    Every script bundles the components folder and the VLC engine, and
+    drops its installer in the "binaries" folder. Details: see the
+    Setup and Build Guide, section 5.
 """
 
 import array
@@ -84,6 +99,7 @@ import os
 import re
 import sys
 import threading
+import time
 
 
 def prepare_bundled_vlc():
@@ -135,6 +151,7 @@ except (ImportError, OSError):
 
 from PySide6.QtCore import (
     QEasingCurve,
+    QEvent,
     QPointF,
     QRectF,
     QSize,
@@ -169,6 +186,8 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QStyledItemDelegate,
+    QStyle,
     QVBoxLayout,
     QWidget,
 )
@@ -181,14 +200,50 @@ except Exception:
     # working even without it.
     QSvgRenderer = None
 
-APP_NAME = "SionicalRadio"
-WINDOW_TITLE = "SIONICAL RADIO"
+APP_NAME = "SionicalRadio 8"
+WINDOW_TITLE = "SIONICAL RADIO v8"
 
-# Fifteen free, listener-supported stations to show the app works out
-# of the box. Each row in the app gets a heart (favorite, floats to
-# the top) and a subtle remove button.
+
+def guarded(label):
+    """Decorate a slot so the app can NEVER die from its own code.
+
+    SIONICAL RADIO is designed not to crash. If anything inside a
+    guarded slot raises - a broken stream, a surprise from libvlc, a
+    weird theme file, a station that vanished mid-flight - the
+    exception is swallowed, the status line (bottom left) says what
+    happened, and the app carries on as if nothing occurred. The
+    paint methods stay unwrapped (they must stay fast and simple);
+    everything a user can click or that runs on a timer is guarded.
+    """
+    def wrap(fn):
+        def inner(self, *args, **kwargs):
+            try:
+                return fn(self, *args, **kwargs)
+            except Exception as exc:
+                try:
+                    self.status_label.setText(
+                        "Hiccup (%s, %s) - recovered, all is well."
+                        % (label, exc.__class__.__name__))
+                except Exception:
+                    pass
+        return inner
+    return wrap
+
+# Eighty-seven free stations chosen for zero (or near-zero)
+# advertising, so the app works out of the box. SomaFM, Radio
+# Paradise, Nightride FM, KEXP, WFMU, WWOZ, KUTX, WQXR, KCRW and BBN
+# are listener-supported with no ad breaks; FIP / Radio France, the
+# Swiss SRG channels, Deutschlandradio, NPO, ORF, VRT, RAI, RNE,
+# RTP, Sveriges Radio, WNYC, Radio Educacion, Reactor and the
+# Latin-American national stations are public radio with no
+# advertising. The one duplicate - Radio Paradise Hi-Fi at 320 kbps,
+# next to the plain 128 kbps Radio Paradise - is the single
+# high-bitrate repeat. Each row in the app gets a heart (favorite,
+# floats to the top), the stream's format and bitrate, and a subtle
+# remove button.
 BUILT_IN_STATIONS = [
     ("SomaFM Groove Salad", "https://ice1.somafm.com/groovesalad-128-mp3"),
+    ("SomaFM Groove Salad Classic", "https://ice1.somafm.com/gsclassic-128-mp3"),
     ("SomaFM Drone Zone", "https://ice1.somafm.com/dronezone-128-mp3"),
     ("SomaFM Lush", "https://ice1.somafm.com/lush-128-mp3"),
     ("SomaFM Beat Blender", "https://ice1.somafm.com/beatblender-128-mp3"),
@@ -202,8 +257,137 @@ BUILT_IN_STATIONS = [
     ("SomaFM Digitalis", "https://ice1.somafm.com/digitalis-128-mp3"),
     ("SomaFM Left Coast 70s", "https://ice1.somafm.com/seventies-128-mp3"),
     ("SomaFM Seven Inch Soul", "https://ice1.somafm.com/7soul-128-mp3"),
+    ("SomaFM Sonic Universe", "https://ice1.somafm.com/sonicuniverse-128-mp3"),
+    ("SomaFM The Trip", "https://ice1.somafm.com/thetrip-128-mp3"),
+    ("SomaFM cliqhop idm", "https://ice1.somafm.com/cliqhop-128-mp3"),
+    ("SomaFM Thistle Radio", "https://ice1.somafm.com/thistle-128-mp3"),
+    ("SomaFM Vaporwaves", "https://ice1.somafm.com/vaporwaves-128-mp3"),
+    ("SomaFM PopTron", "https://ice1.somafm.com/poptron-128-mp3"),
+    ("SomaFM Deep Space One", "https://ice1.somafm.com/deepspaceone-128-mp3"),
+    ("SomaFM Illinois Street Lounge", "https://ice1.somafm.com/illstreet-128-mp3"),
+    ("SomaFM Mission Control", "https://ice1.somafm.com/missioncontrol-128-mp3"),
+    ("SomaFM Folk Forward", "https://ice1.somafm.com/folkfwd-128-mp3"),
+    ("SomaFM Dub Step Beyond", "https://ice1.somafm.com/dubstep-128-mp3"),
+    ("SomaFM n5MD Radio", "https://ice1.somafm.com/n5md-128-mp3"),
+    ("SomaFM Metal Detector", "https://ice1.somafm.com/metal-128-mp3"),
+    ("SomaFM Heavyweight Reggae", "https://ice1.somafm.com/reggae-128-mp3"),
+    ("SomaFM Covers", "https://ice1.somafm.com/covers-128-mp3"),
     ("Radio Paradise", "https://stream.radioparadise.com/mp3-128"),
+    ("Radio Paradise Mellow Mix", "https://stream.radioparadise.com/mellow-128"),
+    ("Radio Paradise Rock Mix", "https://stream.radioparadise.com/rock-128"),
+    ("Radio Paradise Global Mix", "https://stream.radioparadise.com/global-128"),
+    ("Radio Paradise Hi-Fi", "https://stream-dc1.radioparadise.com/aac-320"),
+    ("Radio Swiss Jazz", "http://stream.srg-ssr.ch/m/rsj/mp3_128"),
+    ("Radio Swiss Pop", "http://stream.srg-ssr.ch/m/rsp/mp3_128"),
+    ("Radio Swiss Classic", "http://stream.srg-ssr.ch/m/rsc_de/mp3_128"),
+    ("FIP", "https://icecast.radiofrance.fr/fip-midfi.mp3"),
+    ("FIP Groove", "https://icecast.radiofrance.fr/fipgroove-midfi.mp3"),
+    ("FIP Jazz", "https://icecast.radiofrance.fr/fipjazz-midfi.mp3"),
+    ("FIP Electro", "https://icecast.radiofrance.fr/fipelectro-midfi.mp3"),
+    ("FIP Rock", "https://icecast.radiofrance.fr/fiprock-midfi.mp3"),
+    ("FIP Pop", "https://icecast.radiofrance.fr/fippop-midfi.mp3"),
+    ("FIP Reggae", "https://icecast.radiofrance.fr/fipreggae-midfi.mp3"),
+    ("FIP Metal", "https://icecast.radiofrance.fr/fipmetal-midfi.mp3"),
+    ("FIP Hip-Hop", "https://icecast.radiofrance.fr/fiphiphop-midfi.mp3"),
+    ("FIP World", "https://icecast.radiofrance.fr/fipworld-midfi.mp3"),
+    ("FIP Nouveautes", "https://icecast.radiofrance.fr/fipnouveautes-midfi.mp3"),
+    ("Nightride FM", "https://stream.nightride.fm/nightride.mp3"),
+    ("KEXP", "https://kexp.streamguys1.com/kexp160.aac"),
+    ("WFMU Freeform", "http://stream0.wfmu.org/freeform-128k"),
+    # ---- the newer additions: all HTTP-verified alive, chosen for
+    # ---- zero or minimal advertising. SomaFM stays at the top; these
+    # ---- sit at the bottom, grouped by region.
+    # USA (listener-supported / public radio; no ad breaks):
+    ("WNYC New York", "https://fm939.wnyc.org/wnycfm"),
+    ("WWOZ New Orleans", "https://wwoz-sc.streamguys1.com/wwoz-hi.mp3"),
+    ("KUTX Austin Music", "https://streams.kut.org/4428_192.mp3"),
+    ("WQXR Classical New York", "https://stream.wqxr.org/wqxr"),
+    ("KCRW Eclectic 24", "https://streams.kcrw.com/e24_mp3"),
+    # Christian radio (Bible Broadcasting Network, listener-supported,
+    # completely commercial-free, in English and Spanish):
+    ("BBN Radio English", "http://stream2.bbnradio.org:8000/english.aac"),
+    ("BBN Radio Espanol", "http://stream2.bbnradio.org:8000/spanish.aac"),
+    # Mexico (public cultural radio, no advertising):
+    ("Cultura 96.5 Mexico City", "https://s2.mexside.net/8174/stream"),
+    ("Reactor 105.7 Mexico City", "http://184.164.75.138:8002/stream"),
+    # South America (public / university radio, no advertising):
+    ("Radio Beethoven Chile", "https://unlimited4-us.dps.live/beethovenfm/aac/icecast.audio"),
+    ("Radio Nacional Clasica Argentina", "https://sa.mp3.icecast.magma.edge-access.net/sc_rad37"),
+    ("Radio Nacional Rock Argentina", "https://sa.mp3.icecast.magma.edge-access.net/sc_rad39"),
+    ("Radio MEC FM Brazil", "https://radiomecfm-stream.ebc.com.br/ebc/radiomecfm/MEC_FM-mp4a_277200_eng=20000.m3u8"),
+    ("Radio Filarmonia Peru", "http://c22.radioboss.fm:8100/stream"),
+    # Europe - France (Radio France, public radio, no advertising):
+    ("France Inter", "https://icecast.radiofrance.fr/franceinter-midfi.mp3"),
+    ("France Musique", "https://icecast.radiofrance.fr/francemusique-midfi.mp3"),
+    ("France Culture", "https://icecast.radiofrance.fr/franceculture-midfi.mp3"),
+    ("France Info", "https://icecast.radiofrance.fr/franceinfo-midfi.mp3"),
+    ("Mouv'", "https://icecast.radiofrance.fr/mouv-midfi.mp3"),
+    # Europe - other (public broadcasters, no advertising):
+    ("Deutschlandfunk", "http://st01.dlf.de/dlf/01/128/mp3/stream.mp3"),
+    ("Deutschlandfunk Kultur", "http://st02.dlf.de/dlf/02/128/mp3/stream.mp3"),
+    ("Deutschlandfunk Nova", "http://st03.dlf.de/dlf/03/128/mp3/stream.mp3"),
+    ("NPO Radio 1", "https://icecast.omroep.nl/radio1-bb-mp3"),
+    ("NPO Radio 2", "https://icecast.omroep.nl/radio2-bb-mp3"),
+    ("NPO Klassiek", "https://icecast.omroep.nl/radio4-bb-mp3"),
+    ("NPO 3FM", "https://icecast.omroep.nl/3fm-sb-mp3"),
+    ("OE1 Austria", "https://orf-live.ors-shoutcast.at/oe1-q2a"),
+    ("FM4 Austria", "https://orf-live.ors-shoutcast.at/fm4-q2a"),
+    ("Studio Brussel", "http://quantumcast.vrtcdn.be/stubru/mp3-128"),
+    ("VRT Radio 1", "http://quantumcast.vrtcdn.be/radio1/mp3-128"),
+    ("Rai Radio 2", "http://icestreaming.rai.it/2.mp3"),
+    ("Rai Radio 3", "http://icestreaming.rai.it/3.mp3"),
+    ("RNE Radio Clasica", "https://rtvelivestream.rtve.es/rtvesec/rne/rne_r2_main.m3u8"),
+    ("Antena 1 Portugal", "https://streaming-live.rtp.pt/liveradio/antena180a/playlist.m3u8"),
+    ("Sveriges Radio P2", "https://edge1.sr.se/p2-flac"),
 ]
+
+# Format / bitrate hints for the station rows, for the URLs that do
+# not spell it out themselves (probe_url_info reads the rest straight
+# from the URL). Used by row_info() below.
+STATION_HINTS = {
+    "https://stream.radioparadise.com/mellow-128": ("AAC", 128),
+    "https://stream.radioparadise.com/rock-128": ("AAC", 128),
+    "https://stream.radioparadise.com/global-128": ("AAC", 128),
+    "https://stream.nightride.fm/nightride.mp3": ("MP3", 320),
+    "http://stream0.wfmu.org/freeform-128k": ("MP3", 128),
+}
+for _fip in BUILT_IN_STATIONS:
+    if "icecast.radiofrance.fr" in _fip[1]:
+        STATION_HINTS[_fip[1]] = ("MP3", 128)
+del _fip
+
+# Hints for the newer stations whose URLs do not spell out their
+# format and/or bitrate (everything else is read straight from the
+# URL by probe_url_info). The bitrates are the ones the streams
+# actually broadcast (icy-br), not guesses.
+STATION_HINTS.update({
+    "https://fm939.wnyc.org/wnycfm": ("MP3", 96),
+    "https://wwoz-sc.streamguys1.com/wwoz-hi.mp3": ("MP3", 128),
+    "https://stream.wqxr.org/wqxr": ("MP3", 128),
+    "https://streams.kcrw.com/e24_mp3": ("MP3", 192),
+    "http://stream2.bbnradio.org:8000/english.aac": ("AAC", 48),
+    "http://stream2.bbnradio.org:8000/spanish.aac": ("AAC", 48),
+    "https://s2.mexside.net/8174/stream": ("MP3", 128),
+    "http://184.164.75.138:8002/stream": ("MP3", 128),
+    "https://sa.mp3.icecast.magma.edge-access.net/sc_rad37": ("MP3", 160),
+    "https://sa.mp3.icecast.magma.edge-access.net/sc_rad39": ("MP3", 160),
+    "http://c22.radioboss.fm:8100/stream": ("MP3", 256),
+    "https://icecast.omroep.nl/radio1-bb-mp3": ("MP3", 192),
+    "https://icecast.omroep.nl/radio2-bb-mp3": ("MP3", 192),
+    "https://icecast.omroep.nl/radio4-bb-mp3": ("MP3", 192),
+    "https://icecast.omroep.nl/3fm-sb-mp3": ("MP3", 96),
+    "https://orf-live.ors-shoutcast.at/oe1-q2a": ("MP3", 192),
+    "https://orf-live.ors-shoutcast.at/fm4-q2a": ("MP3", 192),
+    "http://icestreaming.rai.it/2.mp3": ("MP3", 256),
+    "http://icestreaming.rai.it/3.mp3": ("MP3", 320),
+    # The three HLS/FLAC streams below never send icy-br; the format
+    # comes from the station's own documentation, the bitrate is left
+    # to the live stream to report (the pills fill it in).
+    "https://radiomecfm-stream.ebc.com.br/ebc/radiomecfm/MEC_FM-mp4a_277200_eng=20000.m3u8": ("AAC", None),
+    "https://rtvelivestream.rtve.es/rtvesec/rne/rne_r2_main.m3u8": ("AAC", None),
+    "https://streaming-live.rtp.pt/liveradio/antena180a/playlist.m3u8": ("AAC", 183),
+    "https://edge1.sr.se/p2-flac": ("FLAC", None),
+})
 
 # ---------------------------------------------------------------------------
 # THEMES (JSON)
@@ -216,9 +400,12 @@ BUILT_IN_STATIONS = [
 #     "body"  - general text: buttons, station rows, the status line
 #     "wire"  - the wire-outline buttons (band chips, THEME button)
 #
-# Colors are plain web hex values. There are twenty-four themes:
-# numbers 1-12 are dark, numbers 13-24 are light (light backgrounds
-# with dark text). The first theme, "Sionical Blue", is the main
+# Colors are plain web hex values. There are forty-nine themes:
+# numbers 1-17 are dark, numbers 18-34 are light (light backgrounds
+# with dark text), and numbers 35-49 are MID-RANGE: softer themes in
+# which NO color anywhere in the palette is brighter than 75 or darker
+# than 25 in HSL lightness, for people who want less contrast. The
+# first theme, "Sionical Blue", is the main
 # design: every color in it comes straight from the UI mockup. To
 # customize, create a components/themes.json with the same structure
 # and it wins. What each palette key is used for:
@@ -641,6 +828,186 @@ THEMES_JSON = """
       "deep": "#0F7E8C", "text": "#0B5560",
       "glow": "#4FD2DF", "icon": "#FFFFFF"
     }
+  },
+  {
+    "name": "Terra Clay",
+    "fonts": { "brand": "font1", "title": "font2", "body": "font3",
+               "wire": "font4" },
+          "colors": {
+        "bg_top": "#61473D", "bg_bottom": "#543A31",
+        "panel": "#6D544A", "border": "#AB735E",
+        "accent": "#BC765C", "accent2": "#C69786",
+        "deep": "#5C3A2E", "text": "#BFA9A1",
+        "glow": "#BC816B", "icon": "#593B31"
+      }
+  },
+  {
+    "name": "Fern Shadow",
+    "fonts": { "brand": "font5", "title": "font3", "body": "font1",
+               "wire": "font2" },
+          "colors": {
+        "bg_top": "#42614F", "bg_bottom": "#365342",
+        "panel": "#506D5C", "border": "#69A682",
+        "accent": "#69B588", "accent2": "#8FC1A4",
+        "deep": "#345B44", "text": "#A7BEB1",
+        "glow": "#76B691", "icon": "#365845"
+      }
+  },
+  {
+    "name": "Dusk Rose",
+    "fonts": { "brand": "font4", "title": "font5", "body": "font2",
+               "wire": "font1" },
+          "colors": {
+        "bg_top": "#61474C", "bg_bottom": "#543B40",
+        "panel": "#6D555A", "border": "#A2717B",
+        "accent": "#B0737F", "accent2": "#BF979F",
+        "deep": "#5B3940", "text": "#BEACAF",
+        "glow": "#B37F8A", "icon": "#583B41"
+      }
+  },
+  {
+    "name": "Rainy Slate",
+    "fonts": { "brand": "font2", "title": "font1", "body": "font4",
+               "wire": "font3" },
+          "colors": {
+        "bg_top": "#495564", "bg_bottom": "#3D4857",
+        "panel": "#576270", "border": "#7489A4",
+        "accent": "#7690B2", "accent2": "#9AABC1",
+        "deep": "#3B4A5E", "text": "#AFB6C1",
+        "glow": "#8298B5", "icon": "#3E4B5B"
+      }
+  },
+  {
+    "name": "Amber Fog",
+    "fonts": { "brand": "font3", "title": "font4", "body": "font1",
+               "wire": "font5" },
+          "colors": {
+        "bg_top": "#6E6345", "bg_bottom": "#544A31",
+        "panel": "#6D644A", "border": "#AB975E",
+        "accent": "#C2AB6B", "accent2": "#CCBD94",
+        "deep": "#6A5B34", "text": "#C7C0AD",
+        "glow": "#BCA76B", "icon": "#665A38"
+      }
+  },
+  {
+    "name": "Plum Mid",
+    "fonts": { "brand": "font5", "title": "font1", "body": "font2",
+               "wire": "font4" },
+          "colors": {
+        "bg_top": "#5A445A", "bg_bottom": "#503A50",
+        "panel": "#695369", "border": "#9F709F",
+        "accent": "#AA6EAA", "accent2": "#B992B9",
+        "deep": "#533753", "text": "#B9A7B9",
+        "glow": "#AF7EAF", "icon": "#513851"
+      }
+  },
+  {
+    "name": "Sea Glass Noon",
+    "fonts": { "brand": "font1", "title": "font3", "body": "font5",
+               "wire": "font2" },
+          "colors": {
+        "bg_top": "#41625D", "bg_bottom": "#375753",
+        "panel": "#51716C", "border": "#6AA9A1",
+        "accent": "#66B7AC", "accent2": "#8EC3BC",
+        "deep": "#335C56", "text": "#A6BFBC",
+        "glow": "#78BAB1", "icon": "#355955"
+      }
+  },
+  {
+    "name": "Copper Meadow",
+    "fonts": { "brand": "font4", "title": "font2", "body": "font3",
+               "wire": "font1" },
+          "colors": {
+        "bg_top": "#695340", "bg_bottom": "#5E4936",
+        "panel": "#776350", "border": "#B28B66",
+        "accent": "#C29061", "accent2": "#CAAA8B",
+        "deep": "#644930", "text": "#C4B5A6",
+        "glow": "#C39A74", "icon": "#614933"
+      }
+  },
+  {
+    "name": "Stormy Sky",
+    "fonts": { "brand": "font2", "title": "font5", "body": "font3",
+               "wire": "font4" },
+          "colors": {
+        "bg_top": "#484E65", "bg_bottom": "#363B4F",
+        "panel": "#4F5468", "border": "#6974A0",
+        "accent": "#7481B4", "accent2": "#99A1C2",
+        "deep": "#3A415F", "text": "#AEB2C1",
+        "glow": "#7783B1", "icon": "#3C435D"
+      }
+  },
+  {
+    "name": "Mossy Stone",
+    "fonts": { "brand": "font5", "title": "font4", "body": "font1",
+               "wire": "font3" },
+          "colors": {
+        "bg_top": "#57654D", "bg_bottom": "#434F3B",
+        "panel": "#5D6954", "border": "#849D72",
+        "accent": "#92B07D", "accent2": "#ADC0A0",
+        "deep": "#4D5E40", "text": "#B9C2B3",
+        "glow": "#93AD80", "icon": "#4D5C42"
+      }
+  },
+  {
+    "name": "Berry Dusk",
+    "fonts": { "brand": "font3", "title": "font1", "body": "font5",
+               "wire": "font2" },
+          "colors": {
+        "bg_top": "#633B48", "bg_bottom": "#5C3341",
+        "panel": "#754D5A", "border": "#B2617C",
+        "accent": "#C1577B", "accent2": "#C9839A",
+        "deep": "#5E2C3C", "text": "#C0A0AA",
+        "glow": "#C36F8B", "icon": "#5B2F3D"
+      }
+  },
+  {
+    "name": "Jade Harbor",
+    "fonts": { "brand": "font1", "title": "font5", "body": "font4",
+               "wire": "font3" },
+          "colors": {
+        "bg_top": "#436057", "bg_bottom": "#3B5950",
+        "panel": "#557269", "border": "#71A897",
+        "accent": "#6BB39D", "accent2": "#91C0B2",
+        "deep": "#355A4F", "text": "#A7BEB7",
+        "glow": "#7FB8A7", "icon": "#37574E"
+      }
+  },
+  {
+    "name": "Cocoa Haze",
+    "fonts": { "brand": "font4", "title": "font3", "body": "font2",
+               "wire": "font5" },
+          "colors": {
+        "bg_top": "#645544", "bg_bottom": "#504334",
+        "panel": "#6A5D4E", "border": "#A48765",
+        "accent": "#B7946C", "accent2": "#C3AC93",
+        "deep": "#5E4B36", "text": "#C0B6AA",
+        "glow": "#B59673", "icon": "#5C4B38"
+      }
+  },
+  {
+    "name": "Indigo Tide",
+    "fonts": { "brand": "font2", "title": "font4", "body": "font5",
+               "wire": "font1" },
+          "colors": {
+        "bg_top": "#4E4865", "bg_bottom": "#3D3852",
+        "panel": "#57526B", "border": "#776CA2",
+        "accent": "#8174B4", "accent2": "#A199C2",
+        "deep": "#413A5F", "text": "#B2AEC1",
+        "glow": "#867AB3", "icon": "#433C5D"
+      }
+  },
+  {
+    "name": "Lilac Ash",
+    "fonts": { "brand": "font3", "title": "font5", "body": "font1",
+               "wire": "font4" },
+          "colors": {
+        "bg_top": "#5F4D65", "bg_bottom": "#4D3D52",
+        "panel": "#66566B", "border": "#94759F",
+        "accent": "#A37DB0", "accent2": "#B8A0C0",
+        "deep": "#57405E", "text": "#BEB3C2",
+        "glow": "#A483AF", "icon": "#56425C"
+      }
   }
 ]
 """
@@ -678,8 +1045,11 @@ PLAY_BUTTON = 150       # diameter (px) of the big play/stop circle
 SMALL_BUTTON = 46       # diameter (px) of the mute / love / next circles
 CONTROLS_GAP = 12       # gap (px) between the big circle and the circles
 LOGO_HEIGHT = 26        # height (px) of the SIONICAL RADIO text logo
-LOGO_GAP = 40           # air (px) between the green window button and
-                        # the text logo
+LOGO_GAP = 20           # air (px) between the green window button and
+                        # the text logo (halved: the logo sits closer
+                        # to the green button now)
+LOGO_ALPHA = 153        # the logo's opacity: the theme's text color
+                        # drawn at 60% (0.60 x 255 = 153)
 # The visualizer column is fixed to exactly the height of the play
 # column, so the bottom of the bars always sits on the same line as
 # the bottom of the mute / love / next buttons and NEVER grows when
@@ -689,28 +1059,36 @@ EQ_TICK_MS = 16         # visualizer refresh rate (16 ms is about 60 fps)
 EQ_ATTACK = 0.30        # how fast a bar rises toward a louder target
 EQ_RELEASE = 0.07       # how slowly a bar falls toward a quieter target
 EQ_BAR_OPACITY = 0.60   # 0..1 opacity of the visualizer bars (60%)
-MARQUEE_FONT_SIZE = 22  # marquee ("Artist - Song") font size in points
-STATION_FONT_SIZE = 33  # station name font size in points
+EQ_CURVE_WIDTH = 3.5    # line thickness (px) of the CURVE visualizer
+EQ_CURVE_THIN = 1.5     # line thickness (px) of the CURVE - style
+EQ_CURVE_BOLD = 7.5     # line thickness (px) of the CURVE + style
+EQ_H_SOFT_OPACITY = 0.35  # the softer horizontal bars style, more
+                          # transparent than the regular EQ_BAR_OPACITY
+MARQUEE_FONT_SIZE = 24  # marquee ("Artist - Song") font size in points
+STATION_FONT_SIZE = 35  # station name font size in points
 PILL_FONT_SIZE = 9     # format / bitrate pill font size in points
 PILL_ALPHA = 102        # pill wire + text: the station name's color
                         # made 60% more transparent (0.4 x 255)
 PILL_PAD_X = 12         # horizontal padding (px) inside a pill
+ROW_SUB_ALPHA = 90      # the format / bitrate text after the station
+                        # name in the rows: the same font at 35%
+                        # opacity (0.35 x 255 = 90)
 PILL_PAD_Y = 4          # vertical padding (px) inside a pill
 ICON_PAD = 14           # px of padding inside the small circles, all the
                         # way round their SVG icons (the icon is this
                         # much smaller than the button on every side);
                         # 14 px makes the icons about 35% smaller than
                         # the old 10 px, still perfectly centered
-ROW_ICON = 16           # side (px) of the SVG hearts in the station rows
+ROW_ICON = 18           # side (px) of the SVG hearts in the station rows
 CHIP_GAP = 7            # gap (px) between the 10..50 band chips (half
                         # the header's own 14 px spacing)
 THEME_GAP = 3           # gap (px) between the 50 chip and the THEME
                         # button (half the old 6 px)
 HAIRLINE_TOP_ALPHA = 110    # the 2 px line above the station name (0-255)
 HAIRLINE_BOTTOM_ALPHA = 55  # the fainter 2 px line below the marquee
-SHELF_AREA = 188        # visible height (px) of the stations drawer:
-                        # 176 px of list plus breathing room so the
-                        # first row clears the panel's bottom edge
+SHELF_AREA = 188        # the height (px) the window gains when the
+                        # stations drawer opens; any window height
+                        # beyond the panel's own becomes drawer list
 SHELF_OVERLAP = 26      # how far (px) the drawer tucks under the panel
 
 
@@ -808,9 +1186,10 @@ def build_qss():
     """Build the application stylesheet from the current theme.
 
     Hand-painted widgets (buttons, bars, the visualizer) draw their own
-    gradients, and PanelFrame paints the entire rounded window
-    background, so QSS only needs to handle the station list and the
-    scrollbar.
+    gradients, PanelFrame paints the entire rounded window background,
+    and StationRowDelegate paints each station row whole (heart,
+    name, format, bitrate, remove pill), so QSS only needs to handle
+    the scrollbar.
 
     The QMainWindow rule must stay TRANSPARENT, and it must stay LAST.
     Two reasons: the window is translucent (WA_TranslucentBackground,
@@ -827,12 +1206,6 @@ def build_qss():
         QWidget { background: transparent; %(font_line)s font-size: 13px; }
         QLabel { background: transparent; }
         QListWidget { background: transparent; border: none; outline: none; }
-        QListWidget::item {
-            color: %(text)s; background: %(panel)s;
-            border-radius: 10px; margin: 3px 6px; padding: 9px 14px;
-        }
-        QListWidget::item:hover { background: rgba(255, 255, 255, 22); }
-        QListWidget::item:selected { background: %(accent)s; color: #ffffff; }
         QScrollBar:vertical { background: transparent; width: 8px; margin: 0; }
         QScrollBar::handle:vertical {
             background: %(border)s; border-radius: 4px; min-height: 30px;
@@ -1211,6 +1584,25 @@ class StreamEngine(object):
         self.instance = vlc.Instance("--no-video")
         self.player = self.instance.media_player_new()
 
+        # VLC's own "the stream broke" reports (a dead URL, an HTTP
+        # 404, a refused connection) arrive as this event - on a VLC
+        # thread, never as a Python exception. The callback may only
+        # raise a flag; the heartbeat (on_tick) reads it and turns it
+        # into a friendly status-line note, so a bad station never
+        # crash-lands the app.
+        self.stream_error = False
+        self._error_events = []
+        try:
+            def _on_vlc_error(event):
+                self.stream_error = True
+            self._error_events.append(_on_vlc_error)
+            self.player.event_manager().event_attach(
+                vlc.EventType.MediaPlayerEncounteredError, _on_vlc_error)
+        except Exception:
+            # An older python-vlc without the event: the heartbeat's
+            # is_streaming() check still catches dead streams.
+            pass
+
         # ---- silent analyser player ----------------------------------
         self.pcm_tap = PcmTap()
         self.analyser = None
@@ -1224,10 +1616,71 @@ class StreamEngine(object):
                 self.analyser = None
 
         # Analyser health bookkeeping, used by check_analyser(), which
-        # the window's once-a-second heartbeat calls.
+        # the metadata worker below calls once per second.
         self._analyser_url = None      # the URL the audible player uses
         self._analyser_ticks = 0       # heartbeat ticks since play()
         self._analyser_retried = False  # retry once per play()
+
+        # ---- the metadata worker ------------------------------------
+        # Every VLC query that can park on a live stream's internal
+        # locks (get_tracks_info, get_meta, the analyser nurse) runs
+        # on this background daemon thread, NEVER on the GUI thread:
+        # in VLC 3 those media calls can stall for a long stretch
+        # while the input thread is mid-network-IO (that is exactly
+        # how Nightride FM once froze the whole app). The heartbeat
+        # reads this thread's finished snapshots, so the interface
+        # stays responsive even if a station wedges the worker.
+        self._snap_lock = threading.Lock()
+        self._snapshot = {
+            "stamp": 0.0,        # when this snapshot was taken
+            "streaming": False,  # the audible player is live
+            "error": False,      # VLC raised its stream-error event
+            "title": "",         # the ICY "Artist - Song" text
+            "fmt": None,         # live codec, or None
+            "kbps": None,        # live bitrate, or None
+        }
+        self._worker = threading.Thread(
+            target=self._metadata_loop, name="metadata-worker", daemon=True)
+        self._worker.start()
+
+    # ---- the background metadata poller ------------------------------
+
+    def _metadata_loop(self):
+        """Ask VLC the three streaming questions once per second.
+
+        Runs forever on a daemon thread. A wedged poll (a station
+        whose media object parks inside libvlc) simply means no new
+        snapshot: the app keeps running on the last known state.
+        """
+        while True:
+            time.sleep(1.0)
+            try:
+                self._poll_metadata()
+            except Exception:
+                pass
+
+    def _poll_metadata(self):
+        """One poll: streaming state, error flag, title, track info."""
+        streaming = self.is_streaming()
+        error = bool(self.stream_error)
+        title = self.now_playing()
+        fmt, kbps = self.stream_info()
+        self.check_analyser()
+        snap = {
+            "stamp": time.time(),
+            "streaming": streaming,
+            "error": error,
+            "title": title,
+            "fmt": fmt,
+            "kbps": kbps,
+        }
+        with self._snap_lock:
+            self._snapshot = snap
+
+    def latest_snapshot(self):
+        """The worker's most recent finished snapshot (a plain dict)."""
+        with self._snap_lock:
+            return dict(self._snapshot)
 
     def _init_analyser(self):
         """Create the callback-fed player that feeds the visualizer."""
@@ -1260,9 +1713,15 @@ class StreamEngine(object):
     # ---- transport ------------------------------------------------------
 
     def play(self, url):
-        media = self.instance.media_new_location(url)
-        self.player.set_media(media)
-        self.player.play()
+        self.stream_error = False
+        try:
+            media = self.instance.media_new_location(url)
+            self.player.set_media(media)
+            self.player.play()
+        except Exception:
+            # A URL even VLC will not accept: the heartbeat notices
+            # within a second and reports it gently - never a crash.
+            pass
         self._analyser_url = url
         self._analyser_ticks = 0
         self._analyser_retried = False
@@ -1287,13 +1746,15 @@ class StreamEngine(object):
             pass
 
     def check_analyser(self):
-        """Nurse the analyser connection once per heartbeat tick.
+        """Nurse the analyser connection once per metadata poll.
 
         If the plain-http variant never opened (the station is
         https-only), the analyser sits in a dead state and the
-        visualizer would idle forever. This waits a couple of ticks
+        visualizer would idle forever. This waits a couple of polls
         for it to come up, and if it has not, reconnects it on the
-        original URL - once per play(). Never raises.
+        original URL - once per play(). Never raises. Runs on the
+        metadata worker thread, so even a slow reconnect never
+        touches the interface.
         """
         if self.analyser is None or self._analyser_url is None:
             return
@@ -1311,7 +1772,11 @@ class StreamEngine(object):
             self._start_analyser(self._analyser_url)
 
     def stop(self):
-        self.player.stop()
+        try:
+            self.player.stop()
+        except Exception:
+            pass
+        self.stream_error = False
         self._analyser_url = None
         if self.analyser is not None:
             try:
@@ -1321,7 +1786,10 @@ class StreamEngine(object):
         self.pcm_tap.clear()
 
     def set_volume(self, percent):
-        self.player.audio_set_volume(int(percent))
+        try:
+            self.player.audio_set_volume(int(percent))
+        except Exception:
+            pass
 
     def is_streaming(self):
         if vlc is None:
@@ -1557,7 +2025,7 @@ class GradientButton(QPushButton):
         # Wire buttons wear their own font role ("wire"); everything
         # else uses the body font.
         role = "wire" if self.variant == "wire" else "body"
-        metrics = QFontMetrics(theme_font(role, 9 if self._tiny else 11, True))
+        metrics = QFontMetrics(theme_font(role, 9 if self._tiny else 12, True))
         width = metrics.horizontalAdvance(self.text())
         width += 30 if self._tiny else 40
         if self.arrow:
@@ -1624,7 +2092,7 @@ class GradientButton(QPushButton):
         # Wire buttons use the theme's "wire" font; other buttons the
         # "body" font. Change the roles per theme in THEMES_JSON.
         role = "wire" if self.variant == "wire" else "body"
-        font = theme_font(role, 9 if self._tiny else 11, True)
+        font = theme_font(role, 9 if self._tiny else 12, True)
         painter.setFont(font)
         metrics = QFontMetrics(font)
         text = self.text()
@@ -2016,10 +2484,22 @@ class EqualizerWidget(QWidget):
     """The live equalizer visualization.
 
     Every EQ_TICK_MS (16 ms, about 60 fps) the widget pulls the freshest
-    PCM from the engine's tap and runs a small FFT; each bar shows the
-    energy of one logarithmic frequency band - a single rounded
-    rectangle that grows and shrinks with the music, painted at
-    EQ_BAR_OPACITY (60%) so the bars read like tinted glass.
+    PCM from the engine's tap and runs a small FFT; each band shows the
+    energy of one logarithmic frequency band. The chip next to the
+    band numbers cycles SEVEN drawing styles (see MODES), all riding
+    the very same band data:
+      0 CURVE -   one smooth curve, a thin line
+      1 CURVE     one smooth curve, the regular line
+      2 CURVE +   one smooth curve, a bold line
+      3 BARS      vertical bars based at the bottom (the classic look)
+      4 BARS -    the same bars at a QUARTER of their width; the gap
+                  grows, so the bars still span the whole widget
+      5 BARS H    horizontal bars based on the LEFT edge, pumping
+                  right as they rise; a full-level bar reaches the
+                  right edge
+      6 BARS H -  the same horizontal bars, more transparent
+    Bars are painted at EQ_BAR_OPACITY (60%) so they read like tinted
+    glass; the softer horizontal style at EQ_H_SOFT_OPACITY (35%).
 
     SMOOTHING (the anti-flicker): raw FFT band energies jump around a
     lot from frame to frame, which used to look jarring. Two things
@@ -2037,9 +2517,29 @@ class EqualizerWidget(QWidget):
 
     BAND_CHOICES = (10, 20, 30, 40, 50)
 
+    # The seven drawing styles, in the order the chip cycles them.
+    # Each entry is (chip label, status line description).
+    MODES = (
+        ("CURVE -", "the thin smooth curve"),
+        ("CURVE", "the smooth curve"),
+        ("CURVE +", "the bold smooth curve"),
+        ("BARS", "the vertical bars"),
+        ("BARS -", "the thin vertical bars"),
+        ("BARS H", "the horizontal bars"),
+        ("BARS H -", "the softer horizontal bars"),
+    )
+    MODE_CURVE_THIN = 0
+    MODE_CURVE = 1
+    MODE_CURVE_BOLD = 2
+    MODE_BARS = 3          # the style the app starts in
+    MODE_BARS_THIN = 4
+    MODE_BARS_H = 5
+    MODE_BARS_H_SOFT = 6
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._engine = None
+        self.mode = self.MODE_BARS  # the chip cycles this; see MODES
         self.band_count = 20
         self._ranges = band_bin_ranges(20)
         self._levels = [0.03] * 20
@@ -2057,6 +2557,21 @@ class EqualizerWidget(QWidget):
         self._ranges = band_bin_ranges(count)
         self._levels = [0.03] * count
         self.update()
+
+    def set_mode(self, mode):
+        """Switch to one of the seven drawing styles (0..6).
+
+        The window's visualizer chip passes the mode index. The band
+        count is shared by every style, so 10..50 still sets how many
+        bands (or curve points, or horizontal bars) are drawn.
+        """
+        try:
+            mode = int(mode)
+        except (TypeError, ValueError):
+            return
+        if 0 <= mode < len(self.MODES):
+            self.mode = mode
+            self.update()
 
     # ---- data ----------------------------------------------------------
 
@@ -2114,12 +2629,8 @@ class EqualizerWidget(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
         rect = QRectF(self.rect())
         count = self.band_count
+        mode = self.mode
         slot = rect.width() / count
-        # At most 10 px of air between neighboring bars: wide slots
-        # (few bars) get wide bars, tight slots (50 bars) shrink the
-        # gap proportionally so the bars never touch.
-        gap = min(10.0, slot * 0.45)
-        bar_width = max(4.0, slot - gap)
         # The bars end EXACTLY on the widget's bottom edge, which is
         # the same line the mute / love / next buttons end on (the
         # middle row is exactly EQ_HEIGHT tall).
@@ -2127,11 +2638,29 @@ class EqualizerWidget(QWidget):
         top = rect.top() + 3.0
         usable = bottom - top
 
-        # Faint baseline the bars sit on.
+        if mode in (self.MODE_BARS_H, self.MODE_BARS_H_SOFT):
+            self._paint_hbars(painter, rect, usable)
+            return
+
+        # Faint baseline the vertical bars and curves sit on.
         painter.setPen(QPen(col("border", 90), 1.0))
         painter.drawLine(QPointF(rect.left(), bottom),
                          QPointF(rect.right(), bottom))
 
+        if mode <= self.MODE_CURVE_BOLD:
+            self._paint_curve(painter, rect, slot, bottom, usable)
+            return
+
+        # Vertical bars. At most 10 px of air between neighboring
+        # bars: wide slots (few bars) get wide bars, tight slots
+        # (50 bars) shrink the gap proportionally so the bars never
+        # touch. The thin style draws each bar at a QUARTER of the
+        # regular width, still centered in its slot, so the row of
+        # bars keeps spanning the whole width of the widget.
+        gap = min(10.0, slot * 0.45)
+        bar_width = max(4.0, slot - gap)
+        if mode == self.MODE_BARS_THIN:
+            bar_width = max(2.0, bar_width * 0.25)
         # The bars are translucent glass (EQ_BAR_OPACITY = 60%). The
         # baseline above stays solid. Raise EQ_BAR_OPACITY toward 1.0
         # for solid bars; lower it for even fainter ones.
@@ -2148,6 +2677,101 @@ class EqualizerWidget(QWidget):
             painter.setPen(Qt.NoPen)
             painter.drawRoundedRect(bar, 3.0, 3.0)
         painter.setOpacity(1.0)  # full opacity for anything painted later
+
+    def _paint_hbars(self, painter, rect, usable_height):
+        """Draw the HORIZONTAL bar styles (BARS H and BARS H -).
+
+        The exact sideways twin of the classic bars: the bands stack
+        top to bottom, every bar is based on the LEFT edge of the
+        widget, and it pumps RIGHT as its level rises - at the full
+        level it reaches the right edge. The regular style wears the
+        same translucent glass color as the vertical bars
+        (EQ_BAR_OPACITY); the soft style is more transparent
+        (EQ_H_SOFT_OPACITY). A faint vertical baseline marks the left
+        edge the bars grow from.
+        """
+        count = self.band_count
+        left = rect.left()
+        top = rect.top() + 3.0
+        width = rect.right() - left
+        row = usable_height / count
+        # At most 8 px of air between neighboring rows, mirroring the
+        # vertical gap rule so both bar styles feel the same.
+        vgap = min(8.0, row * 0.45)
+        bar_h = max(2.0, row - vgap)
+        soft = (self.mode == self.MODE_BARS_H_SOFT)
+        # Faint baseline the bars start from: the left edge itself.
+        painter.setPen(QPen(col("border", 90), 1.0))
+        painter.drawLine(QPointF(left, top), QPointF(left, rect.bottom()))
+        painter.setOpacity(EQ_H_SOFT_OPACITY if soft else EQ_BAR_OPACITY)
+        for k in range(count):
+            y = top + row * k + (row - bar_h) / 2.0
+            length = max(2.0, width * self._levels[k])
+            bar = QRectF(left, y, length, bar_h)
+            gradient = QLinearGradient(bar.topLeft(), bar.topRight())
+            gradient.setColorAt(0.0, col("accent", 235))
+            gradient.setColorAt(1.0, col("accent2", 255))
+            painter.setBrush(gradient)
+            painter.setPen(Qt.NoPen)
+            painter.drawRoundedRect(bar, 3.0, 3.0)
+        painter.setOpacity(1.0)  # full opacity for anything painted later
+
+    def _paint_curve(self, painter, rect, slot, bottom, usable):
+        """Draw the CURVE: one smooth line over the band-top points.
+
+        The control points sit exactly where each bar's top would have
+        been (band centers, same levels). A Catmull-Rom spline through
+        them is converted to cubic bezier segments, which Qt draws as
+        one continuous, perfectly smooth path. A soft wide glow pass
+        under the line plus the gradient pen and full antialiasing
+        make it read like liquid light. The three curve styles differ
+        only in the pen: EQ_CURVE_THIN (CURVE -), EQ_CURVE_WIDTH
+        (CURVE, the regular) and EQ_CURVE_BOLD (CURVE +).
+        """
+        count = self.band_count
+        points = []
+        for k in range(count):
+            x = rect.left() + slot * (k + 0.5)
+            y = bottom - max(2.0, usable * self._levels[k])
+            points.append(QPointF(x, y))
+        if not points:
+            return
+        if self.mode == self.MODE_CURVE_THIN:
+            pen_w = EQ_CURVE_THIN
+        elif self.mode == self.MODE_CURVE_BOLD:
+            pen_w = EQ_CURVE_BOLD
+        else:
+            pen_w = EQ_CURVE_WIDTH
+        path = QPainterPath()
+        path.moveTo(points[0])
+        if len(points) == 1:
+            path.lineTo(points[0])
+        else:
+            # Catmull-Rom to bezier: each segment's two control points
+            # are built from the segment's end points and their
+            # neighbors, so the curve passes THROUGH every point with
+            # C1 continuity - smooth by construction.
+            for k in range(len(points) - 1):
+                p0 = points[k - 1] if k > 0 else points[0]
+                p1 = points[k]
+                p2 = points[k + 1]
+                p3 = points[k + 2] if k + 2 < len(points) else points[-1]
+                c1x = p1.x() + (p2.x() - p0.x()) / 6.0
+                c1y = p1.y() + (p2.y() - p0.y()) / 6.0
+                c2x = p2.x() - (p3.x() - p1.x()) / 6.0
+                c2y = p2.y() - (p3.y() - p1.y()) / 6.0
+                path.cubicTo(QPointF(c1x, c1y), QPointF(c2x, c2y), p2)
+        # A soft glow first: the same path, much wider, mostly air.
+        painter.setPen(QPen(col("accent", 40), pen_w * 4.0))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPath(path)
+        # Then the curve itself, in a vertical accent gradient.
+        gradient = QLinearGradient(rect.left(), rect.top(),
+                                    rect.left(), bottom)
+        gradient.setColorAt(0.0, col("accent2", 255))
+        gradient.setColorAt(1.0, col("accent", 255))
+        painter.setPen(QPen(gradient, pen_w))
+        painter.drawPath(path)
 
 
 class MarqueeLabel(QLabel):
@@ -2194,10 +2818,10 @@ class LogoLabel(QWidget):
     """The SIONICAL RADIO text logo, tinted with the theme.
 
     Loads the wide wordmark SVG from the components folder
-    (svg_text_logo) and repaints it with the theme's TEXT color on
-    every paint, so cycling themes recolors the logo instantly. Fixed
-    to LOGO_HEIGHT tall (EASY TWEAKS); the width follows the SVG's
-    542 x 129 aspect ratio. If the file is missing the widget simply
+    (svg_text_logo) and repaints it with the theme's TEXT color at
+    LOGO_ALPHA (60%) on every paint, so cycling themes recolors the
+    logo instantly. Fixed to LOGO_HEIGHT tall (EASY TWEAKS); the
+    width follows the SVG's 542 x 129 aspect ratio. If the file is missing the widget simply
     paints nothing - the traffic lights still show and nothing breaks.
     """
 
@@ -2206,7 +2830,7 @@ class LogoLabel(QWidget):
         self.setFixedSize(int(round(LOGO_HEIGHT * LOGO_ASPECT)), LOGO_HEIGHT)
 
     def paintEvent(self, event):
-        pixmap = svg_text_logo(col("text"), LOGO_HEIGHT)
+        pixmap = svg_text_logo(col("text", LOGO_ALPHA), LOGO_HEIGHT)
         if pixmap is None:
             return
         painter = QPainter(self)
@@ -2355,6 +2979,20 @@ def fourcc_to_format(fourcc):
     return None
 
 
+def row_info(url):
+    """The (format, kbps) shown in a station row, or (None, None).
+
+    The hand-curated STATION_HINTS win (they know, for instance, that
+    FIP's "-midfi" streams are 128 kbps MP3 even though the URL never
+    says so); everything else is read straight from the URL by
+    probe_url_info().
+    """
+    hint = STATION_HINTS.get(url)
+    if hint is not None:
+        return hint
+    return probe_url_info(url)
+
+
 class WindowButton(QPushButton):
     """A macOS-style traffic light used on the frameless window.
 
@@ -2474,10 +3112,11 @@ class IconButton(QPushButton):
                 painter.setPen(QPen(col("accent2", 150), 1.0))
                 painter.setBrush(col("accent"))
             else:
-                # Not loved: a very, very faint outline - visible enough
-                # to invite a click, quiet enough to vanish next to the
-                # station name. Raise the 60 alpha for a louder ghost.
-                painter.setPen(QPen(col("text", 60), 1.1))
+                # Not loved: a clearly visible outline in the theme's
+                # text color (the same 150 alpha as the SVG heart, so
+                # the painted fallback is just as findable). Raise the
+                # alpha for a louder heart, lower it for a quieter one.
+                painter.setPen(QPen(col("text", 150), 1.1))
                 painter.setBrush(Qt.NoBrush)
             painter.drawPolygon(points)
         else:  # "close": a thin X
@@ -2487,6 +3126,265 @@ class IconButton(QPushButton):
             box = rect.adjusted(inset, inset, -inset, -inset)
             painter.drawLine(box.topLeft(), box.bottomRight())
             painter.drawLine(box.topRight(), box.bottomLeft())
+
+
+# ---------------------------------------------------------------------------
+# THE STATION LIST AND ITS ROW DELEGATE
+# ---------------------------------------------------------------------------
+
+class StationList(QListWidget):
+    """The drawer's station list.
+
+    Identical to a stock QListWidget except for two things, both in
+    service of the rows:
+
+      * it remembers which row the mouse hovers (mouse tracking is
+        on), so StationRowDelegate can highlight it;
+      * an event filter routes the two little controls inside each
+        row - the heart zone on the left, the remove pill on the
+        right - to the window, and swallows those clicks so they
+        never select the row or trigger a double-click play.
+
+    Selection, scrolling, keyboard and double-click stay pure Qt.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._window = None      # wired up by SionicalWindow._build_ui
+        self._hover_row = None
+        self.setMouseTracking(True)
+        self.viewport().installEventFilter(self)
+
+    def set_window(self, window):
+        """Give the list the window whose station model it shows."""
+        self._window = window
+
+    def _row_at(self, pos):
+        index = self.indexAt(pos)
+        return index.row() if index.isValid() else -1
+
+    def _zone(self, event):
+        """Return (index, "heart" | "x" | None) for a mouse event."""
+        if self._window is None:
+            return None, None
+        pos = event.position().toPoint()
+        index = self.indexAt(pos)
+        if not index.isValid():
+            return None, None
+        # visualItemRect() takes the QListWidgetItem, NOT the QModelIndex
+        # (passing the index raised a TypeError on every single click,
+        # which is why the heart and the remove X never worked).
+        item = self.item(index.row())
+        if item is None:
+            return index, None
+        rect = self.visualItemRect(item)
+        if pos.x() < rect.left() + (StationRowDelegate.ROW_PAD_X
+                                    + StationRowDelegate.HEART_ZONE):
+            return index, "heart"
+        if pos.x() > rect.right() - (StationRowDelegate.ROW_PAD_X
+                                     + StationRowDelegate.X_ZONE):
+            return index, "x"
+        return index, None
+
+    def eventFilter(self, obj, event):
+        kind = event.type()
+        if kind in (QEvent.MouseButtonPress, QEvent.MouseButtonRelease,
+                    QEvent.MouseButtonDblClick):
+            index, zone = self._zone(event)
+            if zone is not None:
+                station = self._window._station_by_url(
+                    index.data(Qt.UserRole))
+                if station is not None and kind == QEvent.MouseButtonRelease:
+                    if zone == "heart":
+                        self._window.on_toggle_favorite(station)
+                    else:
+                        self._window.on_remove_station(station)
+                # Swallow the click either way: pressing the heart or
+                # the pill must not select the row, and a double-click
+                # there must not start playback.
+                return True
+        elif kind == QEvent.MouseMove:
+            row = self._row_at(event.position().toPoint())
+            if row != self._hover_row:
+                self._hover_row = row
+                self.viewport().update()
+        elif kind == QEvent.Leave:
+            if self._hover_row is not None:
+                self._hover_row = None
+                self.viewport().update()
+        return super().eventFilter(obj, event)
+
+
+class StationRowDelegate(QStyledItemDelegate):
+    """Paints one station row, and gives the row its two controls.
+
+    Everything in a row is painted by this ONE delegate - the heart,
+    the station name, the format and bitrate, and the remove pill -
+    so all four always appear together: nothing depends on child
+    widgets or setItemWidget layouts, which can silently fail to lay
+    out. The same painter that draws the station name draws the heart
+    next to it, in the very same paint pass:
+
+      [heart] Station name MP3   128 KBPS .............. [ X ]
+
+    * the heart is heart-filled.svg tinted with the accent when the
+      station is loved (loved stations float to the top of the list),
+      heart-outline.svg - or the painted fallback, the exact heart
+      shape the love circle under the play button uses - in the text
+      color when not. It is always visible, loved or not: that is
+      how you know you can love a station;
+    * the format and bitrate follow the name, the SAME body font at
+      ROW_SUB_ALPHA (35%) opacity, three spaces apart, exactly as
+      the row reads: name, 3 spaces, FORMAT, 3 spaces, BITRATE;
+    * the remove pill at the far right is a thin wire X at the same
+      35% opacity - click it and the station leaves the list for
+      good (StationList routes the click; a station that is playing
+      stops first).
+
+    Clicks on the row itself (not the heart, not the pill) select,
+    and a double-click plays, exactly like before. A selected row
+    fills with the accent color; a hovered row catches a faint
+    highlight; everything else is the theme's own colors.
+    """
+
+    HEART_ZONE = 30    # px at the left: clicking toggles the favorite
+    X_ZONE = 36        # px at the right: clicking removes the station
+    ROW_PAD_X = 14.0   # air inside the left and right row edges
+    ROW_HEIGHT = 46    # one row's height, px
+    ROW_FONT_SIZE = 12 # the row text, in points: the station name and
+                       # the format / bitrate label beside it
+    PILL_W = 30.0      # the remove pill's width, px
+    PILL_H = 22.0      # the remove pill's height, px
+    SELECT_ALPHA = 178  # the selected row's accent fill, 30% more
+                        # transparent than solid (0.70 x 255)
+
+    def __init__(self, window, parent=None):
+        super().__init__(parent)
+        self._window = window
+
+    # ---- geometry (paint and StationList agree on it) ---------------
+
+    def _pill_rect(self, width):
+        return QRectF(width - self.ROW_PAD_X - self.PILL_W,
+                      (self.ROW_HEIGHT - self.PILL_H) / 2.0,
+                      self.PILL_W, self.PILL_H)
+
+    def sizeHint(self, option, index):
+        return QSize(240, self.ROW_HEIGHT)
+
+    # ---- painting -----------------------------------------------------
+
+    def paint(self, painter, option, index):
+        window = self._window
+        url = index.data(Qt.UserRole)
+        station = window._station_by_url(url) if url else None
+        if station is None:
+            QStyledItemDelegate.paint(self, painter, option, index)
+            return
+        favorite = bool(station["favorite"])
+        selected = bool(option.state & QStyle.State_Selected)
+        hovered = (getattr(window.station_list, "_hover_row", None)
+                   == index.row())
+
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = QRectF(option.rect)
+        inner = rect.adjusted(2.0, 1.5, -2.0, -1.5)
+        cy = rect.center().y()
+
+        # 1) the row background: a faint highlight on hover, the
+        #    accent fill when selected - at SELECT_ALPHA, 30% more
+        #    transparent than the full accent, so the highlight
+        #    stays a gentle tint instead of a solid slab.
+        if selected:
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(col("accent", self.SELECT_ALPHA))
+            painter.drawRoundedRect(inner, 10.0, 10.0)
+        elif hovered:
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(255, 255, 255, 22))
+            painter.drawRoundedRect(inner, 10.0, 10.0)
+
+        # 2) the heart, first thing in every row, always visible:
+        #    filled + accent when loved, a clear outline when not.
+        #    On a selected (accent) row both go white so the heart
+        #    never disappears into the highlight.
+        icon_side = float(ROW_ICON)
+        heart_rect = QRectF(self.ROW_PAD_X, cy - icon_side / 2.0,
+                            icon_side, icon_side)
+        if favorite:
+            tint = QColor(255, 255, 255, 230) if selected else col("accent")
+            icon = svg_icon("heart-filled", tint, ROW_ICON)
+        else:
+            outline = (QColor(255, 255, 255, 150) if selected
+                       else col("text", 150))
+            icon = svg_icon("heart-outline", outline, ROW_ICON)
+        if icon is not None:
+            painter.drawPixmap(heart_rect.topLeft(), icon)
+        else:
+            # The painted fallback: the love circle's exact heart.
+            points = QPolygonF([
+                QPointF(heart_rect.left() + heart_rect.width() * px,
+                        heart_rect.top() + heart_rect.height() * py)
+                for px, py in IconButton.HEART
+            ])
+            if favorite:
+                painter.setPen(QPen(tint, 1.0))
+                painter.setBrush(tint)
+            else:
+                painter.setPen(QPen(outline, 1.1))
+                painter.setBrush(Qt.NoBrush)
+            painter.drawPolygon(points)
+
+        # 3) the station name in the body font, then - three spaces
+        #    later, at 35% opacity in the same font - the stream's
+        #    FORMAT and BITRATE ("MP3   128 KBPS").
+        name_font = theme_font("body", self.ROW_FONT_SIZE)
+        fm = QFontMetrics(name_font)
+        text_x = self.ROW_PAD_X + self.HEART_ZONE
+        name_w = rect.width() - text_x - self.PILL_W - 26.0
+        name_rect = QRectF(text_x, rect.top(), name_w, rect.height())
+        shown = fm.elidedText(station["title"], Qt.ElideRight,
+                              int(name_rect.width()))
+        painter.setFont(name_font)
+        painter.setPen(QColor(255, 255, 255) if selected else col("text"))
+        painter.drawText(name_rect, int(Qt.AlignVCenter | Qt.AlignLeft),
+                         shown)
+        row_fmt, row_kbps = row_info(url)
+        bits = []
+        if row_fmt:
+            bits.append(row_fmt.upper())
+        if row_kbps:
+            bits.append("%d KBPS" % row_kbps)
+        if bits:
+            gap = fm.horizontalAdvance("   ")
+            sub_x = text_x + fm.horizontalAdvance(shown) + gap
+            sub_rect = QRectF(sub_x, rect.top(),
+                              max(0.0, self._pill_rect(
+                                  rect.width()).left() - sub_x - 10.0),
+                              rect.height())
+            sub_color = (QColor(255, 255, 255, 150) if selected
+                         else col("text", ROW_SUB_ALPHA))
+            painter.setPen(sub_color)
+            painter.drawText(sub_rect, int(Qt.AlignVCenter | Qt.AlignLeft),
+                             "   ".join(bits))
+
+        # 4) the remove pill: a thin wire X, 35% opacity, a touch
+        #    brighter on the hovered row.
+        pill = self._pill_rect(rect.width()).translated(
+            rect.left(), rect.top())
+        alpha = 140 if hovered else ROW_SUB_ALPHA
+        pen_color = (QColor(255, 255, 255, alpha) if selected
+                     else col("text", alpha))
+        painter.setPen(QPen(pen_color, 1.1))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRoundedRect(pill, 11.0, 11.0)
+        cx = pill.center().x()
+        painter.drawLine(QPointF(cx - 4.0, cy - 4.0),
+                         QPointF(cx + 4.0, cy + 4.0))
+        painter.drawLine(QPointF(cx + 4.0, cy - 4.0),
+                         QPointF(cx - 4.0, cy + 4.0))
+        painter.restore()
 
 
 # ---------------------------------------------------------------------------
@@ -2515,30 +3413,27 @@ class StationShelf(QWidget):
     The rounded rects are extended ABOVE this widget by more than
     SHELF_OVERLAP, and the widget's own clipping cuts the overflow
     away - so only the rounded bottom corners and the side borders
-    ever show. The station list is pinned to the bottom of the shelf
-    with a stretch above it, so while the drawer animates open the
-    rows emerge from under the main panel exactly like a drawer being
-    pulled out. SionicalWindow places and resizes this widget (see
-    _place_frame_children) and drives the slide with a
-    QVariantAnimation.
+    ever show. The station list is the ONLY child and simply fills
+    the shelf: its top margin (SHELF_OVERLAP + 4) keeps the first row
+    just clear of the panel's edge, and every extra pixel of window
+    height becomes visible list. SionicalWindow places and resizes
+    this widget (see _place_frame_children) and drives the slide with
+    a QVariantAnimation on the window's own height.
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setVisible(False)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 0, 12, 8)
+        # The top margin keeps the first row just below the panel's
+        # bottom edge: SHELF_OVERLAP px are covered by the panel, plus
+        # 4 px of clearance so the row never hides under it.
+        layout.setContentsMargins(12, SHELF_OVERLAP + 4, 12, 8)
         layout.setSpacing(0)
-        # The stretch pins the list to the bottom: the rows appear
-        # from under the panel while the shelf grows downward.
-        layout.addStretch(1)
-        self.station_list = QListWidget()
-        # SHELF_AREA holds the list plus breathing room: the list must
-        # start BELOW the SHELF_OVERLAP zone the panel covers (its top
-        # 26 px), otherwise the first row's top edge hides under the
-        # main panel - 4 px of clearance plus an 8 px bottom margin,
-        # so the list itself is SHELF_AREA - 12 tall.
-        self.station_list.setFixedHeight(SHELF_AREA - 12)
+        self.station_list = StationList()
+        # No stretch and no fixed height: the list is the only child,
+        # so it fills the shelf. Opening the drawer (SHELF_AREA) or
+        # growing the window taller both turn straight into rows.
         layout.addWidget(self.station_list)
 
     def paintEvent(self, event):
@@ -2592,10 +3487,12 @@ class SionicalWindow(QMainWindow):
         # be an opaque square and the rounding would be invisible.
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.resize(840, 560)
-        # The middle row (play column + visualizer) now keeps a FIXED
-        # height (EQ_HEIGHT), so the window needs a slightly taller
-        # floor than before to fit every row comfortably.
-        self.setMinimumSize(660, 520)
+        # The width has a floor (the player needs its room); the
+        # HEIGHT is pinned to the player's natural height by
+        # _sync_panel_height(), so there is never dead air under the
+        # volume bar, and growing the window only ever grows the
+        # station drawer.
+        self.setMinimumWidth(660)
         self.setAcceptDrops(True)
 
         self.engine = None
@@ -2603,15 +3500,19 @@ class SionicalWindow(QMainWindow):
         self.playing = False
         self.stream_ok = False
         self._stations_open = False
-        # The station drawer: how far it has slid out from under the
-        # panel (0 = closed). _panel_h is the main panel's height,
-        # maintained by _place_frame_children().
-        self._shelf_extent = 0.0
+        # The station drawer's slide animation (while it runs, the
+        # geometry code must not fight it). _panel_h is the main
+        # panel's height, pinned by _sync_panel_height().
         self._shelf_anim = None
         self._panel_h = 560
         # Volume remembered from before the last mute, so the mute
         # button can restore it.
         self._volume_before_mute = 80
+        # Heartbeat bookkeeping for the status line (see on_tick): how
+        # many seconds the current stream has been dead, and how many
+        # healthy ticks have passed (for the occasional "all is well").
+        self._dead_ticks = 0
+        self._well_ticks = 0
         # The station model: a list of {title, url, favorite} dicts. The
         # QListWidget is just a view of this, rebuilt whenever it changes.
         self._stations = []
@@ -2647,8 +3548,13 @@ class SionicalWindow(QMainWindow):
         self.shelf.lower()  # the drawer slides out from UNDER the panel
 
         self.station_list = self.shelf.station_list
+        self.station_list.set_window(self)
         self.station_list.itemDoubleClicked.connect(
             self.on_item_double_clicked)
+        # One delegate paints every row - heart, name, FORMAT BITRATE
+        # and the remove pill always appear together.
+        self._row_delegate = StationRowDelegate(self, self.station_list)
+        self.station_list.setItemDelegate(self._row_delegate)
 
         root = QVBoxLayout(self.panel)
         root.setContentsMargins(28, 24, 28, 20)
@@ -2674,8 +3580,8 @@ class SionicalWindow(QMainWindow):
         win_row.addWidget(self.maximize_button)
         header.addLayout(win_row)
 
-        # The SIONICAL RADIO text logo, LOGO_GAP (40) px to the right
-        # of the green window button and tinted with the theme.
+        # The SIONICAL RADIO text logo, LOGO_GAP (20) px to the right
+        # of the green window button, tinted with the theme at 60%.
         header.addSpacing(LOGO_GAP)
         self.logo = LogoLabel()
         header.addWidget(self.logo)
@@ -2695,6 +3601,15 @@ class SionicalWindow(QMainWindow):
                 lambda checked, c=count: self.on_band_clicked(c))
             chip_row.addWidget(chip)
             self._band_buttons[count] = chip
+        # The visualizer chip cycles the SEVEN drawing styles (see
+        # EqualizerWidget.MODES): three curves, two vertical bar
+        # styles and two horizontal ones. Its face always shows the
+        # current style's name, and the status line says it too.
+        self.curve_chip = GradientButton(
+            EqualizerWidget.MODES[EqualizerWidget.MODE_BARS][0], "wire",
+            checkable=False)
+        self.curve_chip.clicked.connect(self.on_curve_clicked)
+        chip_row.addWidget(self.curve_chip)
         header.addLayout(chip_row)
         header.addSpacing(THEME_GAP)
         self.theme_button = GradientButton("THEME", "wire", checkable=False)
@@ -2766,9 +3681,11 @@ class SionicalWindow(QMainWindow):
         mid.addWidget(self.equalizer, 1)
         root.addLayout(mid)
 
-        # Extra window height (resize or zoom) gathers here, above the
-        # volume bar - the middle row never changes.
-        root.addStretch(1)
+        # NOTE: no stretch here. A stretch used to gather all extra
+        # window height as dead air between the visualizer and the
+        # volume bar; now the panel keeps its natural height (pinned
+        # by _sync_panel_height) and every extra pixel of window
+        # height goes to the station drawer instead.
 
         # == volume: the percent label sits under the play column and
         # the bar starts exactly where the visualizer starts, because
@@ -2808,27 +3725,71 @@ class SionicalWindow(QMainWindow):
         super().resizeEvent(event)
         if hasattr(self, "panel"):
             self._place_frame_children()
+            self._sync_open_state()
 
     def _place_frame_children(self):
         """Position the main panel and the drawer inside the canvas.
 
-        The drawer's "extent" is how far it has slid out (0 when
-        closed). Its top SHELF_OVERLAP px tuck under the panel, so the
-        window height grows only by the part that is actually visible.
+        The panel keeps its natural height (pinned by
+        _sync_panel_height); the drawer fills everything below it,
+        tucked SHELF_OVERLAP px under the panel's bottom edge. When the
+        window is taller than the panel - drawer open, a manual
+        resize, a zoom - ALL of that extra height becomes drawer list;
+        the player itself never stretches.
         """
-        extent = int(round(self._shelf_extent))
-        visible = max(0, extent - SHELF_OVERLAP)
         w = self.width()
-        self._panel_h = max(1, self.height() - visible)
         self.panel.setGeometry(0, 0, w, self._panel_h)
-        shelf_out = extent > SHELF_OVERLAP
-        self.shelf.setGeometry(0, self._panel_h - SHELF_OVERLAP, w,
-                               max(1, extent))
+        shelf_h = max(1, self.height() - self._panel_h + SHELF_OVERLAP)
+        self.shelf.setGeometry(0, self._panel_h - SHELF_OVERLAP, w, shelf_h)
+        shelf_out = self.height() > self._panel_h + 2
         self.shelf.setVisible(shelf_out)
         self.panel.set_bottom_open(shelf_out)
 
+    @guarded("layout")
+    def _sync_panel_height(self):
+        """Pin the panel (and the window floor) to the player's natural
+        height.
+
+        The panel layout has no stretch, so its minimumSize() height is
+        exactly what the player needs. Pinning the panel and the
+        window's minimum height to it kills the dead air that used to
+        sit between the visualizer and the volume bar, and guarantees
+        that any extra window height (resize, zoom, the drawer) lands
+        in the drawer's list. While the slide animation runs, this is
+        skipped so the two never fight.
+        """
+        if getattr(self, "_shelf_anim", None) is not None:
+            return
+        if self.isMaximized():
+            return
+        natural = self.panel.layout().minimumSize().height()
+        if natural != self._panel_h:
+            self._panel_h = natural
+            self.panel.setFixedHeight(natural)
+        self.setMinimumHeight(self._panel_h)
+        if self._stations_open:
+            self.resize(self.width(), self._panel_h + SHELF_AREA)
+        else:
+            self.resize(self.width(), self._panel_h)
+
+    def _sync_open_state(self):
+        """Match the drawer flag (and the arrow) to the real height.
+
+        Dragging the window taller, or zooming it, opens the drawer by
+        itself - the extra height IS the drawer. The STATIONS button's
+        arrow then flips so it always tells the truth about the state.
+        """
+        if getattr(self, "_shelf_anim", None) is not None:
+            return
+        open_now = self.height() > self._panel_h + 2
+        if open_now != self._stations_open:
+            self._stations_open = open_now
+            self.stations_toggle.arrow = "up" if open_now else "down"
+            self.stations_toggle.update()
+
     # ---- theming -------------------------------------------------------
 
+    @guarded("theme")
     def apply_theme(self):
         """Re-apply fonts, stylesheet and label colors to the whole UI.
 
@@ -2851,6 +3812,10 @@ class SionicalWindow(QMainWindow):
         self.theme_button.setText("THEME : %s" % THEME["name"].upper())
         QApplication.instance().setStyleSheet(build_qss())
         self.rebuild_station_list()
+        # A new theme can change the fonts, and the fonts can change
+        # the player's natural height: re-pin the panel before the
+        # repaints so nothing is left floating or clipped.
+        self._sync_panel_height()
         # Repaint the themed surfaces: the logo (tinted with the theme's
         # text color), the pills (their font is the title font), the
         # hairlines, the panel and the drawer.
@@ -2861,6 +3826,7 @@ class SionicalWindow(QMainWindow):
         self.shelf.update()
         self.update()
 
+    @guarded("theme click")
     def on_theme_clicked(self):
         """Cycle to the next theme (colors and fonts together)."""
         global THEME, THEME_INDEX
@@ -2871,26 +3837,56 @@ class SionicalWindow(QMainWindow):
 
     # ---- visualizer options ----------------------------------------------
 
+    @guarded("band chips")
     def on_band_clicked(self, count):
-        """Switch the equalizer between 10, 20, 30, 40 and 50 bars."""
+        """Switch the equalizer between 10, 20, 30, 40 and 50 bands."""
         for other, chip in self._band_buttons.items():
             chip.setChecked(other == count)
         self.equalizer.set_band_count(count)
 
+    @guarded("curve chip")
+    def on_curve_clicked(self, checked=None):
+        """Cycle the visualizer through its seven drawing styles.
+
+        The `checked` argument is OPTIONAL on purpose: QPushButton's
+        clicked signal is overloaded (clicked() and clicked(bool)) and
+        the guarded wrapper accepts either, so a required argument
+        here used to raise a TypeError the moment the chip was
+        clicked (PySide6 happily binds the no-argument overload).
+        The mode itself is read from the equalizer, never from the
+        signal, so whichever overload fires, the cycle is right.
+        """
+        nxt = (self.equalizer.mode + 1) % len(EqualizerWidget.MODES)
+        self.set_visualizer_mode(nxt)
+
+    def set_visualizer_mode(self, mode):
+        """Point the visualizer at a drawing style, label the chip."""
+        mode = int(mode) % len(EqualizerWidget.MODES)
+        self.equalizer.set_mode(mode)
+        label, spoken = EqualizerWidget.MODES[mode]
+        self.curve_chip.setText(label)
+        self.status_label.setText("Visualizer: %s - all is well." % spoken)
+
     # ---- the station drawer ------------------------------------------------
 
+    @guarded("drawer")
     def on_toggle_stations(self):
         """Slide the station drawer out from under the panel, or in.
 
         The drawer is a protrusion from the bottom of the app: the
         window itself grows downward, so the list genuinely looks like
         it slid out from UNDER the main player. The QVariantAnimation
-        drives _set_shelf_extent, which both resizes the window and
-        re-places the panel and the drawer each frame.
+        drives _set_window_height, which resizes the window each frame
+        (resizeEvent re-places the panel and the drawer). Zoomed
+        windows cannot be animated, so a zoomed window is restored
+        first - the drawer stays open while zoomed, because the zoom's
+        extra height IS the drawer.
         """
         self._stations_open = not self._stations_open
         self.stations_toggle.arrow = "up" if self._stations_open else "down"
         self.stations_toggle.update()
+        if self.isMaximized():
+            self.showNormal()
         if getattr(self, "_shelf_anim", None) is not None:
             try:
                 self._shelf_anim.stop()
@@ -2902,31 +3898,34 @@ class SionicalWindow(QMainWindow):
             self._shelf_anim = None
         animation = QVariantAnimation(self)
         animation.setDuration(280)
-        animation.setStartValue(float(self._shelf_extent))
-        animation.setEndValue(
-            float(SHELF_AREA + SHELF_OVERLAP) if self._stations_open
-            else 0.0)
+        target = (self._panel_h + SHELF_AREA if self._stations_open
+                  else self._panel_h)
+        animation.setStartValue(float(self.height()))
+        animation.setEndValue(float(target))
         animation.setEasingCurve(QEasingCurve.OutCubic)
-        animation.valueChanged.connect(self._set_shelf_extent)
+        animation.valueChanged.connect(self._set_window_height)
+        animation.finished.connect(self._on_shelf_anim_done)
         self._shelf_anim = animation
         animation.start(QVariantAnimation.DeleteWhenStopped)
         if self._stations_open and self.station_list.count():
             self.station_list.setCurrentRow(0)
 
-    def _set_shelf_extent(self, value):
-        """One animation frame: grow (or shrink) the window for the
-        drawer and re-place the panel and the shelf."""
-        self._shelf_extent = float(value)
-        extent = int(round(self._shelf_extent))
-        visible = max(0, extent - SHELF_OVERLAP)
-        target_h = self._panel_h + visible
-        if target_h != self.height():
-            self.resize(self.width(), target_h)
+    def _on_shelf_anim_done(self):
+        """The drawer finished its slide; let the sync helpers run."""
+        self._shelf_anim = None
+
+    @guarded("drawer slide")
+    def _set_window_height(self, value):
+        """One animation frame: set the window's new height."""
+        target = int(round(float(value)))
+        if target != self.height():
+            self.resize(self.width(), target)
         else:
             self._place_frame_children()
 
     # ---- stations --------------------------------------------------------
 
+    @guarded("add station")
     def add_station(self, title, url, favorite=False, rebuild=True):
         """Add a station to the model and refresh the list view."""
         self._stations.append({"title": title, "url": url,
@@ -2934,45 +3933,30 @@ class SionicalWindow(QMainWindow):
         if rebuild:
             self.rebuild_station_list()
 
+    @guarded("rebuild list")
     def rebuild_station_list(self):
         """Rebuild the station list view from the model.
 
         Favorites (hearted stations) always float to the top; within
-        each group the original order is kept. Every row shows the
-        station name plus a heart and a subtle remove button. The
-        current selection survives the rebuild.
+        each group the original order is kept. Every row is painted
+        whole by StationRowDelegate - heart, name, FORMAT BITRATE at
+        35% opacity, and the remove pill - with no child widgets at
+        all, so nothing can fail to appear. The current selection
+        survives the rebuild.
         """
         current_url = None
         item = self.station_list.currentItem()
         if item is not None:
             current_url = item.data(Qt.UserRole)
         self.station_list.clear()
+        self.station_list._hover_row = None
         ordered = sorted(self._stations, key=lambda s: not s["favorite"])
         for station in ordered:
+            # The text rides on the item (for double-click and the
+            # play button); the delegate paints the visible row.
             list_item = QListWidgetItem(station["title"])
             list_item.setData(Qt.UserRole, station["url"])
-            row = QWidget()
-            row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(12, 4, 8, 4)
-            row_layout.setSpacing(6)
-            # The heart comes FIRST, before the station name, so loved
-            # stations read at a glance. Unloved stations show a very
-            # faint heart outline (see IconButton.paintEvent).
-            heart = IconButton("heart")
-            heart.setChecked(bool(station["favorite"]))
-            heart.clicked.connect(
-                lambda checked, s=station: self.on_toggle_favorite(s))
-            row_layout.addWidget(heart)
-            name = QLabel(station["title"])
-            name.setFont(theme_font("body", 10))
-            row_layout.addWidget(name, 1)
-            remove = IconButton("close")
-            remove.clicked.connect(
-                lambda s=station: self.on_remove_station(s))
-            row_layout.addWidget(remove)
-            list_item.setSizeHint(row.sizeHint())
             self.station_list.addItem(list_item)
-            self.station_list.setItemWidget(list_item, row)
             if station["url"] == current_url:
                 self.station_list.setCurrentItem(list_item)
         # Keep the heart under the play circle in sync with the model.
@@ -2996,14 +3980,19 @@ class SionicalWindow(QMainWindow):
                 return station
         return None
 
+    @guarded("favorite")
     def on_toggle_favorite(self, station):
         """Heart (or unheart) a station; hearts always float to the top."""
         station["favorite"] = not station["favorite"]
         self.rebuild_station_list()  # re-sorts, and re-syncs the heart
-        self.status_label.setText("Added to favorites." if
-                                  station["favorite"] else
-                                  "Removed from favorites.")
+        if station["favorite"]:
+            self.status_label.setText(
+                "Loved %s - it floats to the top." % station["title"])
+        else:
+            self.status_label.setText(
+                "Unloved %s - back in its place." % station["title"])
 
+    @guarded("love circle")
     def on_love_toggled(self, checked):
         """The heart circle under the play button: love the playing station.
 
@@ -3021,6 +4010,7 @@ class SionicalWindow(QMainWindow):
             station["favorite"] = bool(checked)
             self.rebuild_station_list()
 
+    @guarded("mute")
     def on_mute_toggled(self, checked):
         """The mute circle: park the volume bar at 0, remember the old value.
 
@@ -3037,6 +4027,7 @@ class SionicalWindow(QMainWindow):
             restore = self._volume_before_mute
             self.volume.set_value(restore if restore > 0 else 60)
 
+    @guarded("next station")
     def on_next_station(self):
         """The NEXT circle: play the next station in list order.
 
@@ -3056,6 +4047,7 @@ class SionicalWindow(QMainWindow):
         nxt = ordered[(start + 1) % len(ordered)]
         self.play_station(nxt["title"], nxt["url"])
 
+    @guarded("remove")
     def on_remove_station(self, station):
         """Remove a station from the list; stop first if it is playing."""
         if (self.playing and self.current_station is not None
@@ -3064,7 +4056,10 @@ class SionicalWindow(QMainWindow):
         if station in self._stations:
             self._stations.remove(station)
         self.rebuild_station_list()
+        self.status_label.setText("Removed %s. All is well."
+                                  % station["title"])
 
+    @guarded("zoom")
     def on_toggle_maximize(self):
         """The green traffic light: zoom the window or restore it."""
         if self.isMaximized():
@@ -3074,6 +4069,7 @@ class SionicalWindow(QMainWindow):
 
     # ---- playback ----------------------------------------------------------
 
+    @guarded("engine")
     def _ensure_engine(self):
         """Create the engine on first use so the error dialog is friendly."""
         if self.engine is not None:
@@ -3087,13 +4083,26 @@ class SionicalWindow(QMainWindow):
             QMessageBox.critical(self, APP_NAME, str(exc))
             return False
 
+    @guarded("play")
     def play_station(self, title, url):
         if not self._ensure_engine():
             return
         self.current_station = (title, url)
-        self.engine.play(url)
+        try:
+            self.engine.play(url)
+        except Exception:
+            # A stream even VLC will not open: refuse it gently and
+            # carry on - the heartbeat would catch a dead stream
+            # anyway, this just fails faster and cleaner.
+            self.playing = False
+            self.status_label.setText(
+                "Could not open that stream - all is well, "
+                "try another one.")
+            return
         self.playing = True
         self.stream_ok = False
+        self._dead_ticks = 0
+        self._well_ticks = 0
         self.station_label.setText(title)
         # The pills start from the URL's own hints right away; the
         # live stream's real track info follows on the next ticks.
@@ -3101,7 +4110,7 @@ class SionicalWindow(QMainWindow):
         # The marquee belongs to the Artist - Song metadata only; the
         # station name lives in the big title above it, once.
         self.marquee.setText("Waiting for track info from the station...")
-        self.status_label.setText("Connecting...")
+        self.status_label.setText("Connecting to %s..." % title)
         self.play_button.set_playing(True)
         # Highlight the row that is now playing, and mirror this
         # station's favorite state onto the heart circle.
@@ -3112,6 +4121,7 @@ class SionicalWindow(QMainWindow):
                 break
         self._sync_love_button()
 
+    @guarded("stop")
     def stop_stream(self):
         if self.engine:
             self.engine.stop()
@@ -3123,10 +4133,11 @@ class SionicalWindow(QMainWindow):
         self.update_stream_pills()
         self.marquee.setText("Double-click a station, drop a .pls file "
                              "anywhere, or open one with ADD PLS.")
-        self.status_label.setText("Stopped.")
+        self.status_label.setText("Stopped. All is well.")
         self.play_button.set_playing(False)
         self._sync_love_button()
 
+    @guarded("play click")
     def on_play_clicked(self):
         """The big circle: play the selected station, or stop if playing."""
         if self.playing:
@@ -3141,9 +4152,11 @@ class SionicalWindow(QMainWindow):
             return
         self.play_station(item.text(), item.data(Qt.UserRole))
 
+    @guarded("double click")
     def on_item_double_clicked(self, item):
         self.play_station(item.text(), item.data(Qt.UserRole))
 
+    @guarded("volume")
     def on_volume_changed(self, value):
         """Volume changed from the bar: forward to the engine and label."""
         self.volume_label.setText("VOLUME %d%%" % value)
@@ -3157,42 +4170,101 @@ class SionicalWindow(QMainWindow):
             self.mute_button.setChecked(False)
             self.mute_button.blockSignals(False)
 
+    @guarded("stream pills")
     def update_stream_pills(self):
         """Refresh the format / bitrate pills beside the station name.
 
         Two sources, most honest first: the LIVE stream's track
-        description (engine.stream_info, available a few seconds into
-        playback) and the URL's own hints (probe_url_info, instant).
+        description (engine.latest_snapshot - filled in by the
+        background worker, so this never blocks the interface on
+        VLC) and the URL's own hints (probe_url_info, instant).
         The pills hide themselves while neither knows anything.
         """
         fmt, kbps = None, None
         if self.current_station:
             fmt, kbps = probe_url_info(self.current_station[1])
         if self.playing and self.engine is not None:
-            live_fmt, live_kbps = self.engine.stream_info()
+            snap = self.engine.latest_snapshot()
+            live_fmt, live_kbps = snap.get("fmt"), snap.get("kbps")
             fmt = live_fmt or fmt
             kbps = live_kbps or kbps
         self.format_pill.set_pill_text(fmt or "")
         self.bitrate_pill.set_pill_text("%d KBPS" % kbps if kbps else "")
 
+    @guarded("tick")
     def on_tick(self):
-        """Once per second: connection status and now-playing metadata."""
+        """Once per second: connection health and now-playing metadata.
+
+        This is also the app's guardian angel. VLC gives up on dead
+        streams (a 404, a refused connection, a station that vanished)
+        by quietly going into an error state - never with a Python
+        exception. The heartbeat notices, stops cleanly, and tells the
+        listener in the status line instead of sitting frozen or
+        crash-landing. A bad station can never take the app down.
+
+        EVERYTHING it reads comes from the engine's background worker
+        (latest_snapshot): the questions themselves - "are you
+        streaming?", "what song is this?", "what codec is that?" -
+        are asked to libvlc on the worker thread, because VLC 3 can
+        park those calls on a live stream's internal locks mid-IO.
+        This heartbeat therefore never blocks the interface, whatever
+        a station is doing.
+        """
         if not self.playing:
             return
         if self.engine is None:
             return
-        # Keep the analyser healthy: it may be connected over the
-        # plain-http variant of the stream (see http_variant in the
-        # engine), and if that variant does not exist the analyser is
-        # reconnected on the original URL here.
-        self.engine.check_analyser()
-        if self.engine.is_streaming():
+        snap = self.engine.latest_snapshot()
+        if snap.get("stamp", 0.0) <= 0.0:
+            # The worker has not finished its first poll yet (the
+            # stream was pressed a moment ago): keep the friendly
+            # "Connecting to..." line instead of guessing.
+            return
+        streaming = bool(snap.get("streaming"))
+        # VLC raises an internal "input error" event for dead URLs
+        # (HTTP 404 and friends); the worker forwards it as this flag.
+        if snap.get("error"):
+            streaming = False
+        if not streaming and snap.get("stamp", 0.0) > 0.0:
+            # A snapshot exists and says we are NOT live. Two honest
+            # possibilities: the station is off the air, or the poll
+            # is old (the worker is wedged on this station's media
+            # object). An old poll is not a verdict - if it has gone
+            # stale the status line says hiccup and the app carries
+            # on; it never guesses a station dead on stale data.
+            stale = time.time() - snap.get("stamp", 0.0) > 8.0
+            if stale:
+                self.stream_ok = False
+                self.status_label.setText(
+                    "Connection hiccup - holding on...")
+                return
+        if streaming:
+            self._dead_ticks = 0
             if not self.stream_ok:
                 self.stream_ok = True
-                self.status_label.setText("Streaming live.")
+                self.status_label.setText(
+                    "Streaming live - all is well.")
+            else:
+                # Once in a while, reassure the listener: the status
+                # line is the app's way of talking.
+                self._well_ticks += 1
+                if self._well_ticks % 25 == 0:
+                    name = (self.current_station[0]
+                            if self.current_station else "the station")
+                    self.status_label.setText(
+                        "All is well - still streaming %s." % name)
         else:
             self.stream_ok = False
-            self.status_label.setText("Connection lost or stopped.")
+            self._dead_ticks += 1
+            if self._dead_ticks >= 5:
+                # The station is off the air (404, refused, gone).
+                # Stop cleanly and say so - never a broken app.
+                self.stop_stream()
+                self.status_label.setText(
+                    "That station is off the air (404 or refused) - "
+                    "all is well, pick another one.")
+                return
+            self.status_label.setText("Connection hiccup - holding on...")
         # Once VLC has parsed the live stream it can report the real
         # codec and bitrate for the pills; until then they show the
         # URL's own hints, so they are only refreshed while something
@@ -3203,7 +4275,7 @@ class SionicalWindow(QMainWindow):
         # now_playing() has already rejected stream plumbing such as a
         # bare "mp3-128" invented from the URL (see is_stream_junk), so
         # whatever lands here is real metadata or an empty string.
-        meta = self.engine.now_playing()
+        meta = snap.get("title") or ""
         if meta and meta != title:
             # Real "Artist - Song" metadata: the marquee's whole job.
             if self.marquee.text() != meta:
@@ -3211,10 +4283,12 @@ class SionicalWindow(QMainWindow):
         elif not self.marquee.text().startswith("Waiting"):
             # Nothing broadcast yet (or the stream only repeats the
             # station name): say so instead of duplicating the title.
-            self.marquee.setText("Waiting for track info from the station...")
+            self.marquee.setText(
+                "Waiting for track info from the station...")
 
     # ---- adding stations ------------------------------------------------
 
+    @guarded("open pls")
     def open_pls_file(self, path=None):
         if path is None:
             path, _ = QFileDialog.getOpenFileName(
@@ -3233,6 +4307,9 @@ class SionicalWindow(QMainWindow):
             return
         for station in stations:
             self.add_station(station["title"], station["url"])
+        self.status_label.setText(
+            "Added %d station%s from the .pls file - all is well."
+            % (len(stations), "s" if len(stations) != 1 else ""))
         first = stations[0]
         # Show the freshly added stations, then start the first one.
         if not self._stations_open:
@@ -3244,13 +4321,18 @@ class SionicalWindow(QMainWindow):
     def on_open_pls(self):
         self.open_pls_file()
 
+    @guarded("add stream")
     def on_add_url(self):
         url, ok = QInputDialog.getText(
             self, "Add stream URL", "Stream URL (http or https):"
         )
         if ok and url.strip().lower().startswith("http"):
-            self.add_station(url.strip().rsplit("/", 1)[-1] or "New station",
-                             url.strip())
+            name = url.strip().rsplit("/", 1)[-1] or "New station"
+            self.add_station(name, url.strip())
+            self.status_label.setText("Added %s. All is well." % name)
+        elif ok:
+            self.status_label.setText(
+                "That does not look like a stream URL (http/https).")
 
     # ---- drag and drop over the whole window ------------------------------
 
@@ -3262,6 +4344,7 @@ class SionicalWindow(QMainWindow):
         if event.mimeData().hasText() and event.mimeData().text().startswith("http"):
             event.acceptProposedAction()
 
+    @guarded("drop")
     def dropEvent(self, event):
         for url in event.mimeData().urls():
             path = url.toLocalFile()

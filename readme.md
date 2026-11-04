@@ -12,13 +12,15 @@ that feels at home on all three platforms.
 
 - A fully rounded, frameless window with macOS-style traffic lights
 - The SIONICAL RADIO text logo in the header, tinted by the theme
-- 34 hand-crafted themes: 17 dark, 17 light
-- A real FFT visualizer (10 to 50 bars) that dances to the live audio
+- 49 hand-crafted themes: 17 dark, 17 light, 15 mid-range (for less contrast)
+- A real FFT visualizer (10 to 50 bands) in SEVEN styles: thin / regular / bold smooth curves, vertical bars (regular and thin), and horizontal bars (regular and softer) - one chip cycles them all
 - A continuously scrolling "Artist - Song" marquee, framed by subtle hairlines
 - Format and bitrate wire pills next to the station name
 - One big play/stop circle, with mute, love, and next-station controls
-- A station drawer that slides out from under the main player
+- A station drawer that slides out from under the main player; extra window height always becomes more list
 - Station favorites: hearts float loved stations to the top of the list
+- 87 built-in stations, all advert-free: SomaFM on top, then Radio Paradise, FIP, Radio Swiss, Nightride FM, KEXP, WFMU, and 35 international additions (USA, Christian, Mexican, South American, European and French public radio) at the bottom; each row shows format and bitrate
+- A crash-proof, freeze-proof core: every slot is guarded, and a background worker asks VLC all the questions, so a dead or stalling station never hangs the window
 - .pls playlist support: open, drag, and drop to play
 - A custom volume bar with a percent readout
 - Up to five custom fonts, each theme picks four of them for four roles
@@ -35,15 +37,18 @@ python SionicalRadio.py
 
 My goal is for anyone to be able to build SIONICAL RADIO locally, even if
 a ready-made installer does not work on their machine. Each platform has
-its own small build script, written in plain bash, using only free tools.
+its own small build script (bash on macOS, PowerShell on Windows),
+using only free tools.
 Every script drops its installers into a `binaries` folder next to the
 project.
 
 ```
 ./build-mac-intel.sh     # macOS Intel (.dmg)
 ./build-mac-silicon.sh   # macOS Apple Silicon (.dmg)
-./build-windows.sh       # Windows x64: .exe and .msi (run in Git Bash)
 ./build-all.sh           # every installer this machine can build
+
+# Windows x64 (.exe, .zip, optional .msi) - PowerShell on the PC:
+powershell -ExecutionPolicy Bypass -File .\build-windows.ps1
 ```
 
 What you need first: Python 3.12 and VLC installed. Each script creates
@@ -54,8 +59,8 @@ and the scripts automatically turn it into the launcher and installer
 icon on every platform.
 
 One honest limitation: installers cannot be cross-built between operating
-systems. A Mac builds both macOS DMGs, and a Windows PC (Git Bash) builds
-the .exe and .msi. `build-all.sh` simply runs whichever of the three apply
+systems. A Mac builds both macOS DMGs, and a Windows PC (PowerShell)
+builds the .exe and .msi. `build-all.sh` simply runs whichever apply
 to the machine you are on and tells you where to run the rest.
 
 The macOS apps are signed ad hoc, so on first launch right-click the app

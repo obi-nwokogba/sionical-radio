@@ -1,45 +1,42 @@
 #!/bin/bash
 # build-all.sh - build every SIONICAL RADIO installer this machine can.
 #
-# One honest limitation first: PyInstaller cannot cross-build between
-# operating systems. A Mac can build both macOS DMGs (Intel and Apple
-# Silicon), and a Windows PC can build the Windows .exe/.msi. This
-# script simply runs whatever applies to the machine you are on, and
-# tells you exactly what to run where for the rest.
+# On a Mac it produces BOTH macOS installers:
+#   binaries/SionicalRadio-macOS-Intel.dmg
+#   binaries/SionicalRadio-macOS-AppleSilicon.dmg
+# On Windows it tells you the one command to run in PowerShell (the
+# Windows build needs PowerShell, not bash).
 #
-# Usage (from the project root, next to SionicalRadio.py):
-#   bash build-all.sh
-#
-# All installers land in the "binaries" folder.
+# Usage:
+#   chmod +x build-all.sh
+#   ./build-all.sh
 
 set -e
 cd "$(dirname "$0")"
 
-echo "==> SIONICAL RADIO - building everything this machine can"
-
 case "$(uname -s)" in
     Darwin)
-        bash build-mac-intel.sh
-        bash build-mac-silicon.sh
+        echo "==> macOS: building both Intel and Apple Silicon installers"
+        ./build-mac-intel.sh
+        ./build-mac-silicon.sh
         echo ""
-        echo "==> macOS installers are in binaries/."
-        echo "    The Windows .exe and .msi must be built on a Windows PC"
-        echo "    (Git Bash from https://gitforwindows.org):"
-        echo "        bash build-windows.sh"
+        echo "The Windows build must be made on a Windows PC in PowerShell:"
+        echo "    powershell -ExecutionPolicy Bypass -File .\build-windows.ps1"
         ;;
-    MINGW*|MSYS*|CYGWIN*)
-        bash build-windows.sh
-        echo ""
-        echo "==> Windows installers are in binaries/."
-        echo "    The macOS DMGs must be built on a Mac:"
-        echo "        bash build-mac-intel.sh && bash build-mac-silicon.sh"
+    MINGW*|MSYS*|CYGWIN*|Windows*)
+        echo "==> Windows detected (bash shell)."
+        echo "The Windows build is a PowerShell script. Run it like this:"
+        echo "    powershell -ExecutionPolicy Bypass -File ./build-windows.ps1"
+        echo "or right-click build-windows.ps1 in Explorer and choose"
+        echo "'Run with PowerShell'."
         ;;
     *)
-        echo "ERROR: this machine is neither macOS nor Windows (Git Bash)."
-        echo "Run this script on a Mac or on a Windows PC inside Git Bash."
+        echo "ERROR: unsupported system ($(uname -s))."
+        echo "Use build-mac-intel.sh / build-mac-silicon.sh on a Mac,"
+        echo "or build-windows.ps1 in PowerShell on a Windows PC."
         exit 1
         ;;
 esac
 
 echo ""
-echo "All applicable installers are in binaries/."
+echo "DONE"
